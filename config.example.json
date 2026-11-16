@@ -1,0 +1,96 @@
+{
+  "schema": 1,
+  "music_dir": "",
+  "library": {
+    "exclude_dirs": [
+      "@eaDir",
+      "#recycle",
+      "lost+found",
+      "$RECYCLE.BIN",
+      "System Volume Information",
+      ".Trash",
+      ".trash",
+      "node_modules",
+      "__pycache__"
+    ],
+    "extensions": [
+      ".flac",
+      ".mp3",
+      ".m4a",
+      ".mp4",
+      ".ogg",
+      ".opus",
+      ".wav",
+      ".aiff",
+      ".aif",
+      ".ape",
+      ".wv"
+    ],
+    "follow_symlinks": false
+  },
+  "web": {
+    "host": "0.0.0.0",
+    "port": 8090,
+    "password_hash": "",
+    "secret": "",
+    "page_size": 60
+  },
+  "repair": {
+    "targets": ["lyrics", "cover"],
+    "overwrite_lyrics": false,
+    "overwrite_cover": false,
+    "min_cover_size": 300,
+    "max_cover_size": 1280,
+    "jpeg_quality": 90,
+    "write_lrc": false,
+    "write_cover_file": false,
+    "simplified": true,
+    "allow_plain_lyrics": true,
+    "min_lyrics_chars": 20,
+    "fix_placeholder_tags": true,
+    "backup": true,
+    "max_backups": 300
+  },
+  "providers": {
+    "lyrics": ["netease", "qqmusic", "lrclib"],
+    "cover": ["netease", "qqmusic", "itunes"],
+    "timeout": 12,
+    "retries": 1,
+    "proxy": "",
+    "min_score": 55,
+    "parallel": true
+  },
+  "automation": {
+    "scan_on_start": true,
+    "watch_enabled": true,
+    "watch_interval_min": 30,
+    "auto_fix_new": true,
+    "fix_on_play": true,
+    "schedule_enabled": true,
+    "schedule_time": "03:30",
+    "schedule_days": [1, 2, 3, 4, 5, 6, 7],
+    "max_fix_per_run": 40,
+    "targets": ["lyrics", "cover"],
+    "last_scan_at": "",
+    "last_fix_at": "",
+    "last_schedule_date": "",
+    "watch_changes": true
+  },
+  "navidrome": {
+    "enabled": false,
+    "url": "",
+    "username": "",
+    "password": "",
+    "rescan_after_fix": false
+  },
+  "jellyfin": {
+    "enabled": false,
+    "url": "",
+    "api_key": "",
+    "refresh_after_fix": false
+  },
+  "ui": {
+    "accent": "#7c5cff",
+    "language": "zh-CN"
+  }
+}

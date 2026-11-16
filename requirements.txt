@@ -1,0 +1,7 @@
+# 本地音乐整理小插件 - 运行依赖
+# 树莓派 / Debian 上推荐用 install.sh 自动创建虚拟环境安装
+Flask>=3.0,<4
+mutagen>=1.47
+Pillow>=10.0
+waitress>=3.0
+zhconv>=1.4

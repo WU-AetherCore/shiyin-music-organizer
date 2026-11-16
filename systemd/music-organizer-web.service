@@ -1,0 +1,23 @@
+[Unit]
+Description=Music Organizer Web UI (本地音乐整理小插件)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# 安装脚本会用实际的用户与路径替换下列占位符
+User=__USER__
+Group=__GROUP__
+WorkingDirectory=__APP_DIR__
+Environment=HOME=__HOME__
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStart=__APP_DIR__/venv/bin/morg web --host 0.0.0.0 --port __PORT__
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=15
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

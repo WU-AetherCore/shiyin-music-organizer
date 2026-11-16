@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>服务出错 · 本地音乐整理小插件</title>
+  <link rel="stylesheet" href="/static/css/app.css?v={{ version }}">
+</head>
+<body class="error-body">
+  <main class="error-card">
+    <div class="error-code">500</div>
+    <h1>服务出了点问题</h1>
+    <p>{{ error }}</p>
+    <p class="muted">可以查看数据目录下的 logs/morg.log 获取详细信息。</p>
+    <a class="btn btn-primary" href="/">返回首页</a>
+  </main>
+</body>
+</html>

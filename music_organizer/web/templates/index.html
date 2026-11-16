@@ -1,0 +1,262 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0a0d18">
+  <meta name="description" content="本地音乐整理小插件：为树莓派上的本地音乐批量嵌入歌词与封面">
+  <title>本地音乐整理小插件</title>
+  <link rel="manifest" href="/manifest.json">
+  <link rel="icon" href="/static/img/icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/static/css/app.css?v={{ version }}">
+</head>
+<body data-version="{{ version }}">
+<div class="app" id="app">
+  <aside class="sidebar" id="sidebar">
+    <a class="brand" href="#/dashboard" aria-label="返回概览">
+      <span class="brand-mark">
+        <svg viewBox="0 0 48 48" aria-hidden="true">
+          <defs>
+            <linearGradient id="brandGrad" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0" stop-color="#a78bfa"/><stop offset=".55" stop-color="#7c5cff"/><stop offset="1" stop-color="#38e8ff"/>
+            </linearGradient>
+          </defs>
+          <circle cx="24" cy="24" r="18" fill="url(#brandGrad)" opacity=".16"/>
+          <circle cx="24" cy="24" r="13" fill="none" stroke="url(#brandGrad)" stroke-width="2.2"/>
+          <circle cx="24" cy="24" r="7" fill="none" stroke="url(#brandGrad)" stroke-width="1.4" opacity=".7"/>
+          <circle cx="24" cy="24" r="2.6" fill="url(#brandGrad)"/>
+          <path d="M36 10v14.5a4.2 4.2 0 1 1-2.4-3.8V13.4l-6 1.3" fill="none" stroke="url(#brandGrad)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+      </span>
+      <span class="brand-text">
+        <span class="brand-name">拾音</span>
+        <span class="brand-sub">MUSIC ORGANIZER</span>
+      </span>
+    </a>
+
+    <nav class="nav" id="nav">
+      <a class="nav-item" href="#/dashboard" data-route="dashboard">
+        <svg class="nav-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="9" rx="2"/><rect x="14" y="3" width="7" height="5" rx="2"/><rect x="14" y="12" width="7" height="9" rx="2"/><rect x="3" y="16" width="7" height="5" rx="2"/></svg>
+        <span>概览</span>
+      </a>
+      <a class="nav-item" href="#/library" data-route="library">
+        <svg class="nav-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
+        <span>音乐库</span>
+      </a>
+      <a class="nav-item" href="#/repair" data-route="repair">
+        <svg class="nav-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L3 18l3 3 6.3-6.3a4 4 0 0 0 5.4-5.4l-2.6 2.6-2.4-2.4 2.6-2.6z"/></svg>
+        <span>修复中心</span>
+      </a>
+      <a class="nav-item" href="#/automation" data-route="automation">
+        <svg class="nav-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.5"/><path d="M12 7v5l3.2 2"/><path d="M4.8 4.8l1.2 1.2M19.2 4.8L18 6"/></svg>
+        <span>自动化</span>
+      </a>
+      <a class="nav-item" href="#/settings" data-route="settings">
+        <svg class="nav-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.6 1.6 0 0 0 .32 1.77l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06A1.6 1.6 0 0 0 15 19.4a1.6 1.6 0 0 0-1 1.47V21a2 2 0 1 1-4 0v-.09A1.6 1.6 0 0 0 9 19.4a1.6 1.6 0 0 0-1.77.32l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.6 1.6 0 0 0 4.6 15a1.6 1.6 0 0 0-1.47-1H3a2 2 0 1 1 0-4h.09A1.6 1.6 0 0 0 4.6 9a1.6 1.6 0 0 0-.32-1.77l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.6 1.6 0 0 0 9 4.6a1.6 1.6 0 0 0 1-1.47V3a2 2 0 1 1 4 0v.09a1.6 1.6 0 0 0 1 1.47 1.6 1.6 0 0 0 1.77-.32l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.6 1.6 0 0 0 19.4 9v.09a1.6 1.6 0 0 0 1.47 1H21a2 2 0 1 1 0 4h-.09a1.6 1.6 0 0 0-1.51 1z"/></svg>
+        <span>设置</span>
+      </a>
+    </nav>
+
+    <div class="sidebar-card">
+      <div class="sidebar-card-head">
+        <span class="sidebar-label">音乐目录</span>
+        <button class="mini-link" data-action="open-folder">更换</button>
+      </div>
+      <div class="sidebar-path" id="sidebarPath">未选择</div>
+      <div class="sidebar-stat" id="sidebarStat">等待扫描</div>
+    </div>
+
+    <div class="sidebar-foot">
+      <span class="pulse-dot" id="autoDot"></span>
+      <span id="autoText">自动任务</span>
+      <span class="version">v{{ version }}</span>
+    </div>
+  </aside>
+
+  <main class="main">
+    <header class="topbar">
+      <div class="page-heading">
+        <h1 id="pageTitle">概览</h1>
+        <p id="pageSubtitle">正在加载曲库…</p>
+      </div>
+      <label class="search" id="searchWrap">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+        <input id="globalSearch" type="search" placeholder="搜索歌曲、歌手、专辑…" autocomplete="off" spellcheck="false">
+        <kbd>/</kbd>
+      </label>
+      <div class="topbar-actions">
+        <button class="icon-btn" data-action="refresh" title="刷新数据" aria-label="刷新">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/></svg>
+        </button>
+        <button class="btn btn-primary" id="topSaveBtn" data-action="save-settings" style="display:none" title="保存设置">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 4.5 4.5L19 7"/></svg>
+          <span>保存</span>
+        </button>
+        <button class="btn btn-primary" data-action="scan">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5M11 8v6M8 11h6"/></svg>
+          <span>扫描曲库</span>
+        </button>
+      </div>
+    </header>
+
+    <div class="view" id="view">
+      <div class="boot">
+        <div class="boot-orb"></div>
+        <p>正在连接曲库…</p>
+      </div>
+    </div>
+  </main>
+</div>
+
+<div class="player" id="playerBar" aria-label="播放器">
+  <div class="player-track">
+    <button class="pb-cover-btn" data-action="open-player" title="展开播放器">
+      <img class="pb-cover" id="pbCover" alt="" src="/static/img/icon.svg">
+    </button>
+    <div class="pb-meta">
+      <button class="pb-title" id="pbTitle" data-action="open-player">未在播放</button>
+      <div class="pb-artist" id="pbArtist">选一首歌开始</div>
+    </div>
+    <button class="icon-btn icon-btn-sm pb-fav" id="pbFav" data-action="favorite-current" title="收藏">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.7l-1.1-1.1a5.5 5.5 0 0 0-7.8 7.8l1.1 1.1L12 21l7.8-7.5 1.1-1.1a5.5 5.5 0 0 0-.1-7.8z"/></svg>
+    </button>
+  </div>
+
+  <div class="player-center">
+    <div class="player-controls">
+      <button class="icon-btn icon-btn-sm" data-action="toggle-shuffle" id="pbShuffle" title="随机播放">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M16 3h5v5"/><path d="M4 20 21 3"/><path d="M21 16v5h-5"/><path d="m15 15 6 6"/><path d="M4 4l5 5"/></svg>
+      </button>
+      <button class="icon-btn" data-action="prev" title="上一首">
+        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M6 5h2v14H6zM20 5v14L9 12z"/></svg>
+      </button>
+      <button class="play-btn" id="pbPlay" data-action="toggle-play" title="播放 / 暂停" aria-label="播放">
+        <svg id="pbPlayIcon" viewBox="0 0 24 24" fill="currentColor"><path d="M7 4.5v15l13-7.5z"/></svg>
+      </button>
+      <button class="icon-btn" data-action="next" title="下一首">
+        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M16 5h2v14h-2zM4 5v14l11-7z"/></svg>
+      </button>
+      <button class="icon-btn icon-btn-sm" data-action="cycle-repeat" id="pbRepeat" title="播放模式">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M17 2l4 4-4 4"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><path d="M7 22l-4-4 4-4"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>
+      </button>
+    </div>
+    <div class="eq-bars player-eq" id="pbEq" aria-hidden="true"></div>
+    <div class="progress-row">
+      <span id="pbCur">00:00</span>
+      <div class="progress" id="pbProgress" data-action="seek">
+        <div class="progress-fill" id="pbFill"></div>
+        <div class="progress-thumb" id="pbThumb"></div>
+      </div>
+      <span id="pbDur">00:00</span>
+    </div>
+  </div>
+
+  <div class="player-right">
+    <span class="quality-chip" id="pbQuality" title="原始文件直通，不做转码">—</span>
+    <button class="icon-btn lyric-btn" data-action="open-player" title="歌词">词</button>
+    <button class="icon-btn" data-action="open-queue" title="播放队列">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 6h16M4 12h16M4 18h10"/></svg>
+    </button>
+    <div class="volume">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5 6 9H3v6h3l5 4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M18.5 5.5a9 9 0 0 1 0 13"/></svg>
+      <input type="range" id="volume" min="0" max="100" value="80" aria-label="音量">
+    </div>
+  </div>
+</div>
+
+<div class="nowplaying" id="nowPlaying" aria-hidden="true">
+  <div class="np-backdrop" id="npBackdrop"></div>
+  <div class="np-head">
+    <button class="icon-btn" data-action="close-player" title="收起">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+    </button>
+    <div class="np-head-title">正在播放</div>
+    <button class="icon-btn" data-action="open-queue" title="播放队列">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 6h16M4 12h16M4 18h10"/></svg>
+    </button>
+  </div>
+  <div class="np-body">
+    <div class="np-left">
+      <div class="np-cover-wrap">
+        <div class="np-cover-glow" id="npGlow"></div>
+        <img class="np-cover" id="npCover" alt="" src="/static/img/icon.svg">
+      </div>
+      <h2 class="np-title" id="npTitle">未在播放</h2>
+      <p class="np-artist" id="npArtist">—</p>
+      <div class="np-meta" id="npMeta"></div>
+      <div class="np-actions">
+        <button class="btn btn-soft" data-action="repair-current">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L3 18l3 3 6.3-6.3a4 4 0 0 0 5.4-5.4l-2.6 2.6-2.4-2.4 2.6-2.6z"/></svg>
+          修复歌词 / 封面
+        </button>
+        <button class="btn btn-ghost" data-action="candidates-current">选择候选</button>
+        <button class="btn btn-ghost" data-action="open-track-current">详情</button>
+      </div>
+    </div>
+    <div class="np-right">
+      <div class="lyrics-head">
+        <span class="lyrics-label">歌词</span>
+        <div class="lyrics-tools">
+          <button class="offset-btn" data-action="offset-down" title="歌词提前 0.5 秒">−</button>
+          <span class="offset-val" id="offsetVal">0.0s</span>
+          <button class="offset-btn" data-action="offset-up" title="歌词延后 0.5 秒">+</button>
+          <button class="mini-link" data-action="edit-lyrics-current">编辑</button>
+        </div>
+      </div>
+      <div class="lyrics-scroll" id="lyricsScroll">
+        <div class="lyrics-empty">
+          <span class="lyrics-empty-icon">♪</span>
+          <p>暂无歌词</p>
+          <button class="btn btn-soft btn-sm" data-action="candidates-current">在线搜索歌词</button>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="np-foot">
+    <div class="eq-bars np-eq" id="npEq" aria-hidden="true"></div>
+    <div class="np-progress">
+      <span id="npCur">00:00</span>
+      <div class="progress" data-action="seek"><div class="progress-fill" id="npFill"></div></div>
+      <span id="npDur">00:00</span>
+    </div>
+    <div class="np-controls">
+      <button class="icon-btn" data-action="prev" title="上一首"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M6 5h2v14H6zM20 5v14L9 12z"/></svg></button>
+      <button class="play-btn play-btn-lg" data-action="toggle-play" aria-label="播放">
+        <svg id="npPlayIcon" viewBox="0 0 24 24" fill="currentColor"><path d="M7 4.5v15l13-7.5z"/></svg>
+      </button>
+      <button class="icon-btn" data-action="next" title="下一首"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M16 5h2v14h-2zM4 5v14l11-7z"/></svg></button>
+      <div class="np-volume">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5 6 9H3v6h3l5 4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/></svg>
+        <input type="range" id="npVolume" min="0" max="100" value="80" aria-label="音量">
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="drawer-backdrop" id="drawerBackdrop"></div>
+<aside class="drawer queue-drawer" id="queueDrawer" aria-hidden="true">
+  <div class="drawer-head">
+    <div><div class="drawer-title">播放队列</div><div class="drawer-sub" id="queueSub">0 首</div></div>
+    <button class="icon-btn" data-action="close-queue" aria-label="关闭">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg>
+    </button>
+  </div>
+  <div class="queue-list" id="queueList"></div>
+</aside>
+
+<aside class="drawer track-drawer" id="trackDrawer" aria-hidden="true">
+  <div class="drawer-head">
+    <div><div class="drawer-title">歌曲详情</div><div class="drawer-sub">标签、歌词与封面</div></div>
+    <button class="icon-btn" data-action="close-track" aria-label="关闭">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg>
+    </button>
+  </div>
+  <div class="track-drawer-body" id="trackDrawerBody"></div>
+</aside>
+
+<div class="modal-root" id="modalRoot" aria-hidden="true"></div>
+<div class="toast-root" id="toastRoot" aria-live="polite"></div>
+<audio id="audio" preload="auto"></audio>
+<script src="/static/js/app.js?v={{ version }}"></script>
+</body>
+</html>

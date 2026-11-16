@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#141a2e"/>
+      <stop offset="1" stop-color="#0a0d18"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#b388ff"/>
+      <stop offset=".5" stop-color="#7c5cff"/>
+      <stop offset="1" stop-color="#38e8ff"/>
+    </linearGradient>
+    <radialGradient id="glow" cx=".3" cy=".2" r=".8">
+      <stop offset="0" stop-color="#7c5cff" stop-opacity=".45"/>
+      <stop offset="1" stop-color="#7c5cff" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect width="512" height="512" rx="112" fill="url(#bg)"/>
+  <rect width="512" height="512" rx="112" fill="url(#glow)"/>
+  <circle cx="256" cy="256" r="150" fill="none" stroke="url(#accent)" stroke-width="18"/>
+  <circle cx="256" cy="256" r="105" fill="none" stroke="url(#accent)" stroke-width="7" opacity=".55"/>
+  <circle cx="256" cy="256" r="62" fill="none" stroke="url(#accent)" stroke-width="4" opacity=".35"/>
+  <circle cx="256" cy="256" r="24" fill="url(#accent)"/>
+  <path d="M372 112v134a38 38 0 1 1-20-33V142l-58 13" fill="none" stroke="url(#accent)" stroke-width="18" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>
