@@ -87,6 +87,9 @@ DEFAULT_CONFIG: Dict[str, Any] = {
         "min_score": 55,
         "parallel": True,
     },
+    "playback": {
+        "quality": "original",
+    },
     "automation": {
         "scan_on_start": True,
         "watch_enabled": True,

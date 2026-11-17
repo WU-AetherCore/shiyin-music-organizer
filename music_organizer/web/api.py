@@ -5,12 +5,13 @@ from __future__ import annotations
 import html
 import os
 import shutil
+import subprocess
 import urllib.parse
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from flask import Blueprint, Response, current_app, jsonify, request, send_file, session
+from flask import Blueprint, Response, current_app, jsonify, request, send_file, session, stream_with_context
 
 from .. import __version__, audio, db, jobs
 from ..automation import Automation
@@ -163,6 +164,7 @@ def _overview_payload() -> Dict[str, Any]:
         "jobs": _manager().list(6),
         "activity": db.recent_activity(8, paths),
         "providers": provider_catalog(),
+        "playback": cfg.get("playback") or {"quality": "original"},
         "navidrome": {
             "enabled": bool(cfg.get("navidrome.enabled")),
             "url": cfg.get("navidrome.url") or "",
@@ -786,7 +788,7 @@ def put_settings():
     data = _body()
     cfg = _cfg()
     patch = data.get("config") if isinstance(data.get("config"), dict) else data
-    allowed = {"library", "repair", "providers", "automation", "navidrome", "jellyfin", "ui"}
+    allowed = {"library", "repair", "providers", "playback", "automation", "navidrome", "jellyfin", "ui"}
     clean: Dict[str, Any] = {}
     for key in allowed:
         if isinstance(patch.get(key), dict):
@@ -1019,6 +1021,67 @@ def media_cover(track_id: int):
     return resp
 
 
+PLAYBACK_QUALITIES: Dict[str, tuple] = {
+    "mp3_320": ("audio/mpeg", ["-c:a", "libmp3lame", "-b:a", "320k", "-f", "mp3"]),
+    "mp3_192": ("audio/mpeg", ["-c:a", "libmp3lame", "-b:a", "192k", "-f", "mp3"]),
+    "mp3_128": ("audio/mpeg", ["-c:a", "libmp3lame", "-b:a", "128k", "-f", "mp3"]),
+    "aac_256": (
+        "audio/mp4",
+        ["-c:a", "aac", "-b:a", "256k", "-f", "mp4", "-movflags", "frag_keyframe+empty_moov"],
+    ),
+    "opus_192": ("audio/ogg", ["-c:a", "libopus", "-b:a", "192k", "-f", "ogg"]),
+}
+
+
+def _transcoded_response(path: Path, quality: str):
+    ffmpeg = shutil.which("ffmpeg")
+    if not ffmpeg:
+        return Response("系统未安装 ffmpeg，无法转码播放", status=503, mimetype="text/plain")
+    mimetype, codec_args = PLAYBACK_QUALITIES[quality]
+
+    def generate():
+        proc = subprocess.Popen(
+            [
+                ffmpeg,
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-nostdin",
+                "-i",
+                str(path),
+                "-map",
+                "0:a",
+                "-map_metadata",
+                "0",
+                "-vn",
+                *codec_args,
+                "pipe:1",
+            ],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+        )
+        try:
+            assert proc.stdout is not None
+            while True:
+                chunk = proc.stdout.read(64 * 1024)
+                if not chunk:
+                    break
+                yield chunk
+        finally:
+            if proc.poll() is None:
+                proc.kill()
+            try:
+                proc.wait(timeout=2)
+            except Exception:
+                pass
+
+    resp = Response(stream_with_context(generate()), mimetype=mimetype)
+    resp.headers["Cache-Control"] = "no-store"
+    resp.headers["Accept-Ranges"] = "none"
+    resp.headers["X-Playback-Quality"] = quality
+    return resp
+
+
 @media.get("/stream/<int:track_id>")
 def media_stream(track_id: int):
     track = db.get_track(track_id, _paths())
@@ -1027,6 +1090,9 @@ def media_stream(track_id: int):
     path = Path(track["path"])
     if not path.is_file():
         return Response(status=404)
+    requested_quality = str(request.args.get("quality") or (_cfg().get("playback.quality") or "original"))
+    if requested_quality in PLAYBACK_QUALITIES:
+        return _transcoded_response(path, requested_quality)
     mimetypes = {
         ".flac": "audio/flac",
         ".mp3": "audio/mpeg",

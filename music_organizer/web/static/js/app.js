@@ -1568,6 +1568,9 @@ function renderSettings() {
   const totalTracks = Number(stats.total || 0);
   const lyricsCoverage = totalTracks ? Math.round(((totalTracks - Number(stats.missing_lyrics || 0)) * 100) / totalTracks) : 0;
   const coverCoverage = totalTracks ? Math.round(((totalTracks - Number(stats.missing_cover || 0)) * 100) / totalTracks) : 0;
+  const playbackQualityValue = (cfg.playback && cfg.playback.quality) || 'original';
+  const playbackIsOriginal = playbackQualityValue === 'original';
+  const playbackLabel = playbackQualityLabel(playbackQualityValue);
   const path = s.music_dir || '';
   const hasPath = Boolean(path);
   $('#view').innerHTML = `
@@ -1678,22 +1681,30 @@ function renderSettings() {
           <div style="display:flex;gap:8px;margin-top:14px"><button class="btn btn-ghost btn-sm" data-action="test-jellyfin">测试连接</button><button class="btn btn-ghost btn-sm" data-action="jellyfin-refresh">立即刷新</button></div>
           <div id="jellyfinResult" class="modal-note" style="margin-top:10px"></div>`)}
 
-        ${settingsCard('check', '播放音质', '原始文件直通，不做二次编码', `
+        ${settingsCard('check', '播放音质', playbackIsOriginal ? '原始文件直通，不做二次编码' : '服务端实时转码，默认仍然直通', `
+          ${settingRow('播放模式', '默认原始文件直通；修改后下一首生效', `<select class="select" data-setting="playback.quality" style="width:150px">
+            <option value="original" ${playbackIsOriginal ? 'selected' : ''}>原始文件直通</option>
+            <option value="mp3_320" ${playbackQualityValue === 'mp3_320' ? 'selected' : ''}>MP3 320 kbps</option>
+            <option value="mp3_192" ${playbackQualityValue === 'mp3_192' ? 'selected' : ''}>MP3 192 kbps</option>
+            <option value="mp3_128" ${playbackQualityValue === 'mp3_128' ? 'selected' : ''}>MP3 128 kbps</option>
+            <option value="aac_256" ${playbackQualityValue === 'aac_256' ? 'selected' : ''}>AAC 256 kbps</option>
+            <option value="opus_192" ${playbackQualityValue === 'opus_192' ? 'selected' : ''}>Opus 192 kbps</option>
+          </select>`)}
           <div class="about-rows">
-            <div>传输方式：HTTP Range 直读原始文件</div>
-            <div>转码 / 降采样：<span style="color:var(--green)">关闭</span></div>
+            <div>当前模式：<span style="color:${playbackIsOriginal ? 'var(--green)' : 'var(--warn)'}">${esc(playbackLabel)}</span></div>
+            <div>传输方式：${playbackIsOriginal ? 'HTTP Range 直读原始文件' : 'HTTP 实时转码流（不支持拖动）'}</div>
+            <div>转码 / 降采样：<span style="color:${playbackIsOriginal ? 'var(--green)' : 'var(--warn)'}">${playbackIsOriginal ? '关闭' : '开启'}</span></div>
             <div>支持格式：FLAC / MP3 / M4A / OGG / WAV / AIFF</div>
-            <div>浏览器最终输出受系统音频设备限制；插件不压缩、不转码。</div>
           </div>
           <div style="display:flex;gap:6px;margin-top:12px;flex-wrap:wrap">
-            <span class="badge badge-ok">无损优先</span>
-            <span class="badge badge-accent">原文件直通</span>
+            <span class="badge ${playbackIsOriginal ? 'badge-ok' : 'badge-warn'}">${playbackIsOriginal ? '无损优先' : '服务端转码'}</span>
+            <span class="badge badge-accent">${esc(playbackLabel)}</span>
           </div>
           <div class="format-grid">
             <span>FLAC</span><span>MP3</span><span>M4A</span><span>OGG</span>
             <span>WAV</span><span>AIFF</span><span>APE</span><span>WV</span>
           </div>
-          <p class="settings-note">浏览器最终输出受系统音频设备限制；插件不转码、不降采样。</p>`)}
+          <p class="settings-note">${playbackIsOriginal ? '浏览器最终输出受系统音频设备限制；插件不转码、不降采样。' : '转码仅影响浏览器播放，不修改文件；转码流不支持拖动进度。'}</p>`)}
 
         ${settingsCard('check', '关于', '本地音乐整理小插件', `
           <div class="about-rows">
@@ -1882,6 +1893,9 @@ function updatePlayerShell() {
   const fav = $('#pbFav');
   fav.classList.toggle('active', !!t.favorite);
   $('#pbQuality').textContent = t.quality || (t.ext || '').toUpperCase();
+  $('#pbQuality').title = playbackQuality() === 'original'
+    ? '原始文件直通，不做转码'
+    : `${playbackQualityLabel()} 实时转码，不支持拖动`;
   $$('.track-row').forEach((row) => {
     const isCurrent = Number(row.dataset.trackId) === t.id;
     row.classList.toggle('playing', isCurrent);
@@ -1898,7 +1912,7 @@ function renderNowPlaying() {
   $('#npBackdrop').style.backgroundImage = `url("${t.cover_url}")`;
   $('#npMeta').innerHTML = `
     <span class="badge badge-accent">${esc(t.quality || t.ext)}</span>
-    <span class="badge badge-ok">原文件直通</span>
+    <span class="badge ${playbackQuality() === 'original' ? 'badge-ok' : 'badge-warn'}">${esc(playbackQualityLabel())}</span>
     ${t.lyrics_synced ? '<span class="badge badge-ok">逐行歌词</span>' : t.has_lyrics ? '<span class="badge">纯文本歌词</span>' : '<span class="badge badge-bad">缺歌词</span>'}
     ${t.has_cover ? '' : '<span class="badge badge-bad">缺封面</span>'}`;
   $('#npDur').textContent = t.duration_text;
@@ -1944,6 +1958,36 @@ function updatePlayModeUI() {
   }
 }
 
+const PLAYBACK_QUALITY_LABELS = {
+  original: '原始文件直通',
+  mp3_320: 'MP3 320 kbps',
+  mp3_192: 'MP3 192 kbps',
+  mp3_128: 'MP3 128 kbps',
+  aac_256: 'AAC 256 kbps',
+  opus_192: 'Opus 192 kbps',
+};
+
+function playbackQuality() {
+  return (state.overview && state.overview.playback && state.overview.playback.quality) || 'original';
+}
+
+function playbackQualityLabel(value = playbackQuality()) {
+  return PLAYBACK_QUALITY_LABELS[value] || PLAYBACK_QUALITY_LABELS.original;
+}
+
+function playbackStreamUrl(track) {
+  const base = track.stream_url || `/media/stream/${track.id}`;
+  try {
+    const url = new URL(base, location.origin);
+    const quality = playbackQuality();
+    if (quality !== 'original') url.searchParams.set('quality', quality);
+    else url.searchParams.delete('quality');
+    return `${url.pathname}${url.search}`;
+  } catch (err) {
+    return base;
+  }
+}
+
 async function playTracks(queue, id) {
   const list = (queue || []).filter(Boolean);
   const index = list.findIndex((t) => Number(t.id) === Number(id));
@@ -1966,7 +2010,7 @@ async function loadTrack(track) {
   if (!track.stream_url) {
     track.stream_url = `/media/stream/${track.id}`;
   }
-  audio.src = track.stream_url;
+  audio.src = playbackStreamUrl(track);
   audio.play().catch(() => toast('浏览器阻止了自动播放，请再点一次播放', 'err'));
   document.title = `${track.title} · 本地音乐整理小插件`;
   startPlayTimer();
@@ -3020,6 +3064,7 @@ async function handleAction(action, el, event) {
         watch_changes: $('[data-auto-key="watch_changes"]').checked,
         auto_fix_new: $('[data-auto-key="auto_fix_new"]').checked,
         fix_on_play: $('[data-auto-key="fix_on_play"]').checked,
+        auto_fix_timing: $('[data-auto-key="auto_fix_timing"]').checked,
         schedule_enabled: $('[data-auto-key="schedule_enabled"]').checked,
         watch_interval_min: Number($('#autoInterval').value || 0),
         schedule_time: $('#autoTime').value || '03:30',
@@ -3309,8 +3354,9 @@ function handleAudioError() {
     state.retrying = true;
     setBuffering(true);
     toast('播放中断，正在自动续播…', 'err', 2200);
-    const base = String(state.current.stream_url || '').split('?')[0];
-    audio.src = `${base}?recover=${Date.now()}`;
+    const recovery = new URL(playbackStreamUrl(state.current), location.origin);
+    recovery.searchParams.set('recover', String(Date.now()));
+    audio.src = `${recovery.pathname}${recovery.search}`;
     audio.load();
     const timer = setTimeout(() => {
       state.retrying = false;
