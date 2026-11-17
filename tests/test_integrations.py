@@ -4,6 +4,23 @@ from types import SimpleNamespace
 from music_organizer import jellyfin, navidrome
 
 
+def test_notify_records_last_sync_status(env, monkeypatch):
+    from music_organizer import jobs
+
+    monkeypatch.setattr(navidrome, "trigger_rescan", lambda config, paths, full=True: (True, "Navidrome ok"))
+    monkeypatch.setattr(jellyfin, "refresh", lambda config, paths: (True, "Jellyfin ok"))
+    cfg = env["config"]
+    cfg.update({
+        "navidrome": {"enabled": True, "rescan_after_fix": True},
+        "jellyfin": {"enabled": True, "refresh_after_fix": True},
+    })
+    messages = jobs.notify_media_servers(cfg, env["paths"])
+    assert any("Navidrome" in item for item in messages)
+    assert cfg.get("navidrome.last_sync_ok") is True
+    assert cfg.get("jellyfin.last_sync_ok") is True
+    assert cfg.get("jellyfin.last_sync_at")
+
+
 class FakeClient:
     def __init__(self, items):
         self.items = items

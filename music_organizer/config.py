@@ -114,12 +114,18 @@ DEFAULT_CONFIG: Dict[str, Any] = {
         "username": "",
         "password": "",
         "rescan_after_fix": False,
+        "last_sync_at": "",
+        "last_sync_ok": False,
+        "last_sync_message": "",
     },
     "jellyfin": {
         "enabled": False,
         "url": "",
         "api_key": "",
         "refresh_after_fix": False,
+        "last_sync_at": "",
+        "last_sync_ok": False,
+        "last_sync_message": "",
     },
     "ui": {
         "accent": "#7c5cff",

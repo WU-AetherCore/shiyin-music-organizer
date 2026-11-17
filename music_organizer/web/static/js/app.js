@@ -1558,6 +1558,27 @@ function settingRow(name, desc, control) {
   return `<div class="setting-row"><div class="info"><div class="setting-name">${esc(name)}</div><div class="setting-desc">${esc(desc)}</div></div><div class="setting-control">${control}</div></div>`;
 }
 
+function integrationSyncHtml(cfg, key) {
+  const data = (cfg && cfg[key]) || {};
+  if (!data.enabled) return `<div class="integration-sync muted" data-sync-status="${key}">未启用联动</div>`;
+  if (!data.last_sync_at) return `<div class="integration-sync muted" data-sync-status="${key}">尚未同步 · 修复或点「立即刷新」后显示结果</div>`;
+  const ok = Boolean(data.last_sync_ok);
+  return `<div class="integration-sync ${ok ? 'sync-ok' : 'sync-fail'}" data-sync-status="${key}">
+    <span class="sync-dot"></span>
+    <div><b>上次同步：${ok ? '成功' : '失败'}</b><span>${esc(relativeTime(data.last_sync_at))} · ${esc(data.last_sync_message || '')}</span></div>
+  </div>`;
+}
+
+function updateIntegrationSync(key, lastSync) {
+  const cfg = state.settings && state.settings.config;
+  if (!cfg || !cfg[key] || !lastSync) return;
+  cfg[key].last_sync_at = lastSync.at;
+  cfg[key].last_sync_ok = lastSync.ok;
+  cfg[key].last_sync_message = lastSync.message;
+  const old = document.querySelector(`[data-sync-status="${key}"]`);
+  if (old) old.outerHTML = integrationSyncHtml(cfg, key);
+}
+
 function renderSettings() {
   const s = state.settings;
   if (!s) { $('#view').innerHTML = '<div class="boot"><div class="boot-orb"></div><p>正在读取设置…</p></div>'; return; }
@@ -1670,6 +1691,7 @@ function renderSettings() {
           ${settingRow('修复后自动扫描', '每轮批量修复结束后自动触发一次扫描', `<label class="toggle"><input type="checkbox" data-setting="navidrome.rescan_after_fix" ${cfg.navidrome.rescan_after_fix ? 'checked' : ''}><span></span></label>`)}
           <div style="display:flex;gap:8px;margin-top:14px"><button class="btn btn-ghost btn-sm" data-action="test-navidrome">测试连接</button><button class="btn btn-ghost btn-sm" data-action="navidrome-rescan">立即扫描</button></div>
           <div id="navidromeResult" class="modal-note" style="margin-top:10px"></div>
+          ${integrationSyncHtml(cfg, 'navidrome')}
           <p class="settings-note">${cfg.navidrome.enabled ? '联动已启用；修复完成后会自动触发一次扫描。' : '当前未启用；保存并测试连接后可开启自动扫描。'}</p>`)}
 
         ${settingsCard('play', 'Jellyfin 联动', '修复完成后让 Jellyfin 刷新媒体库', `
@@ -1679,7 +1701,8 @@ function renderSettings() {
           <label class="field" style="margin-bottom:10px"><span>API Key</span><input class="input" type="password" data-setting="jellyfin.api_key" value="" placeholder="${hasJellyKey ? '已保存，留空则不修改' : '粘贴 API Key'}"></label>
           ${settingRow('修复后自动刷新', '每轮批量修复结束后自动触发一次刷新', `<label class="toggle"><input type="checkbox" data-setting="jellyfin.refresh_after_fix" ${cfg.jellyfin.refresh_after_fix ? 'checked' : ''}><span></span></label>`)}
           <div style="display:flex;gap:8px;margin-top:14px"><button class="btn btn-ghost btn-sm" data-action="test-jellyfin">测试连接</button><button class="btn btn-ghost btn-sm" data-action="jellyfin-refresh">立即刷新</button></div>
-          <div id="jellyfinResult" class="modal-note" style="margin-top:10px"></div>`)}
+          <div id="jellyfinResult" class="modal-note" style="margin-top:10px"></div>
+          ${integrationSyncHtml(cfg, 'jellyfin')}`)}
 
         ${settingsCard('check', '播放音质', playbackIsOriginal ? '原始文件直通，不做二次编码' : '服务端实时转码，默认仍然直通', `
           ${settingRow('播放模式', '默认原始文件直通；修改后下一首生效', `<select class="select" data-setting="playback.quality" style="width:150px">
@@ -1841,6 +1864,7 @@ async function refreshJellyfin() {
     if (box) {
       box.innerHTML = `<span style="color:${res.refreshed ? 'var(--green)' : 'var(--red)'}">${esc(res.message)}</span>`;
     }
+    updateIntegrationSync('jellyfin', res.last_sync);
   } catch (err) {
     if (box) box.innerHTML = `<span style="color:var(--red)">${esc(err.message)}</span>`;
   }
@@ -3141,6 +3165,7 @@ async function handleAction(action, el, event) {
       try {
         const res = await api('/api/navidrome/rescan', { method: 'POST' });
         if (box) box.innerHTML = `<span style="color:${res.ok ? 'var(--green)' : 'var(--red)'}">${esc(res.message)}</span>`;
+        updateIntegrationSync('navidrome', res.last_sync);
       } catch (err) { if (box) box.textContent = err.message; }
       break;
     }

@@ -535,13 +535,24 @@ def notify_media_servers(
     """通知 Navidrome/Jellyfin；返回日志行，供任务和同步接口复用。"""
     messages: List[str] = []
     emit = log or messages.append
+    status_changed = False
+
+    def record(prefix: str, ok: bool, message: str) -> None:
+        nonlocal status_changed
+        config.set(f"{prefix}.last_sync_at", _now())
+        config.set(f"{prefix}.last_sync_ok", bool(ok))
+        config.set(f"{prefix}.last_sync_message", str(message or "")[:300])
+        status_changed = True
+
     if config.get("navidrome.enabled") and config.get("navidrome.rescan_after_fix"):
         try:
             from .navidrome import trigger_rescan
 
             ok, message = trigger_rescan(config, paths, full=True)
+            record("navidrome", ok, message)
             emit(("Navidrome 重新扫描：成功" if ok else "Navidrome 重新扫描失败：") + message)
         except Exception as exc:
+            record("navidrome", False, str(exc))
             emit(f"Navidrome 联动失败：{exc}")
     if config.get("jellyfin.enabled") and config.get("jellyfin.refresh_after_fix"):
         try:
@@ -553,9 +564,13 @@ def notify_media_servers(
                 from .jellyfin import refresh
 
                 ok, message = refresh(config, paths)
+            record("jellyfin", ok, message)
             emit(("Jellyfin 刷新：成功" if ok else "Jellyfin 刷新失败：") + message)
         except Exception as exc:
+            record("jellyfin", False, str(exc))
             emit(f"Jellyfin 联动失败：{exc}")
+    if status_changed:
+        config.save()
     return messages
 
 

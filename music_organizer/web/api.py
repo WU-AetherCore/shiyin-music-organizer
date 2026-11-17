@@ -859,6 +859,16 @@ def test_providers():
     return jsonify({"ok": True, "results": results})
 
 
+def _record_integration_status(prefix: str, ok: bool, message: str) -> Dict[str, Any]:
+    cfg = _cfg()
+    at = datetime.now().isoformat(timespec="seconds")
+    cfg.set(f"{prefix}.last_sync_at", at)
+    cfg.set(f"{prefix}.last_sync_ok", bool(ok))
+    cfg.set(f"{prefix}.last_sync_message", str(message or "")[:300])
+    cfg.save()
+    return {"at": at, "ok": bool(ok), "message": str(message or "")[:300]}
+
+
 @bp.post("/navidrome/test")
 def navidrome_test():
     from ..navidrome import check
@@ -871,8 +881,8 @@ def navidrome_test():
 def navidrome_rescan():
     from ..navidrome import trigger_rescan
 
-    ok, message = trigger_rescan(_cfg(), _paths())
-    return jsonify({"ok": ok, "message": message})
+    ok, message = trigger_rescan(_cfg(), _paths(), full=True)
+    return jsonify({"ok": ok, "message": message, "last_sync": _record_integration_status("navidrome", ok, message)})
 
 
 @bp.post("/jellyfin/test")
@@ -906,7 +916,9 @@ def jellyfin_refresh():
                 patch[key] = str(data[key])
         cfg.update({"jellyfin": patch}, save=False)
     ok, message = refresh(cfg, _paths())
-    return jsonify({"ok": True, "refreshed": ok, "message": message})
+    return jsonify(
+        {"ok": True, "refreshed": ok, "message": message, "last_sync": _record_integration_status("jellyfin", ok, message)}
+    )
 
 
 @bp.get("/lrc/scan")

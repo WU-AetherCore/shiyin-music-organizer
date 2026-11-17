@@ -89,13 +89,19 @@
     "url": "",
     "username": "",
     "password": "",
-    "rescan_after_fix": false
+    "rescan_after_fix": false,
+    "last_sync_at": "",
+    "last_sync_ok": false,
+    "last_sync_message": ""
   },
   "jellyfin": {
     "enabled": false,
     "url": "",
     "api_key": "",
-    "refresh_after_fix": false
+    "refresh_after_fix": false,
+    "last_sync_at": "",
+    "last_sync_ok": false,
+    "last_sync_message": ""
   },
   "ui": {
     "accent": "#7c5cff",
