@@ -2441,9 +2441,16 @@ async function handleAction(action, el, event) {
       if ($('#targetTags') && $('#targetTags').checked) targets.push('tags');
       if (!targets.length) { toast('请至少选择一个修复目标', 'err'); return; }
       const limit = Number($('#repairLimit') ? $('#repairLimit').value : 0) || 0;
-      await startBatch(scope, scope === 'bad_lyrics' ? ['lyrics'] : targets, {
+      const finalTargets = scope === 'bad_lyrics'
+        ? ['lyrics']
+        : scope === 'issues'
+          ? ['tags']
+          : scope === 'all'
+            ? ['lyrics', 'cover', 'tags']
+            : targets;
+      await startBatch(scope, finalTargets, {
         limit,
-        force: scope === 'bad_lyrics' || ($('#repairForce') ? $('#repairForce').checked : false),
+        force: scope === 'bad_lyrics' || scope === 'all' || ($('#repairForce') ? $('#repairForce').checked : false),
         dryRun: $('#repairDry') ? $('#repairDry').checked : false,
       });
       break;
