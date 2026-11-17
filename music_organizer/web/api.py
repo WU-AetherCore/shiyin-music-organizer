@@ -123,6 +123,8 @@ def track_json(track: Dict[str, Any], base: str = "") -> Dict[str, Any]:
         "has_lyrics": bool(track.get("has_lyrics")),
         "lyrics_synced": bool(track.get("lyrics_synced")),
         "lyrics_source": track.get("lyrics_source") or "",
+        "lyrics_timing_status": track.get("lyrics_timing_status") or "",
+        "lyrics_timing_issues": track.get("lyrics_timing_issues") or [],
         "has_cover": bool(track.get("has_cover")),
         "cover_source": track.get("cover_source") or "",
         "health": track.get("health") or "ok",
@@ -516,6 +518,9 @@ def auto_fix_track(track_id: int):
         missing.append("lyrics")
     if not track.get("has_cover"):
         missing.append("cover")
+    timing_bad = str(track.get("lyrics_timing_status") or "") in ("broken", "suspect")
+    if timing_bad and "lyrics" not in missing:
+        missing.insert(0, "lyrics")
     if not missing:
         return jsonify({"queued": False, "reason": "歌词与封面都已存在"})
     job_id = jobs.start_single(
@@ -524,12 +529,12 @@ def auto_fix_track(track_id: int):
         _manager(),
         track_id=track_id,
         targets=missing,
-        force=False,
+        force=timing_bad,
         source="play",
     )
     if not job_id:
         return jsonify({"queued": False, "reason": "这首歌正在修复中"})
-    return jsonify({"queued": True, "job_id": job_id, "targets": missing})
+    return jsonify({"queued": True, "job_id": job_id, "targets": missing, "timing": timing_bad})
 
 
 @bp.get("/tracks/<int:track_id>/candidates")
@@ -624,7 +629,18 @@ def repair_batch():
     if not targets:
         raise ApiError("请至少选择一个修复目标")
     filter_name = str(data.get("filter") or "all")
-    if filter_name not in ("all", "missing_any", "missing_cover", "missing_lyrics", "missing_both", "issues", "unsynced_lyrics", "no_embedded_cover"):
+    if filter_name not in (
+        "all",
+        "missing_any",
+        "missing_cover",
+        "missing_lyrics",
+        "missing_both",
+        "issues",
+        "unsynced_lyrics",
+        "no_embedded_cover",
+        "bad_lyrics",
+        "lyrics_timing",
+    ):
         raise ApiError("不支持的筛选条件")
     limit = int(data.get("limit") or 0)
     ids = data.get("ids") if isinstance(data.get("ids"), list) else None

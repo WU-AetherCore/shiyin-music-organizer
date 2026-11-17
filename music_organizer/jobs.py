@@ -234,7 +234,11 @@ def _auto_fix_new(config: Config, paths: AppPaths, manager: JobManager, new_ids:
     need = [
         track
         for track in tracks
-        if (("lyrics" in targets and not track.get("has_lyrics")) or ("cover" in targets and not track.get("has_cover")))
+        if (
+            ("lyrics" in targets and not track.get("has_lyrics"))
+            or ("cover" in targets and not track.get("has_cover"))
+            or ("lyrics" in targets and str(track.get("lyrics_timing_status") or "") in ("broken", "suspect"))
+        )
     ][:limit]
     if not need:
         return None

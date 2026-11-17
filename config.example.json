@@ -48,6 +48,7 @@
     "allow_plain_lyrics": true,
     "min_lyrics_chars": 20,
     "fix_placeholder_tags": true,
+    "fix_timing": true,
     "backup": true,
     "max_backups": 300
   },
@@ -66,6 +67,7 @@
     "watch_interval_min": 30,
     "auto_fix_new": true,
     "fix_on_play": true,
+    "auto_fix_timing": true,
     "schedule_enabled": true,
     "schedule_time": "03:30",
     "schedule_days": [1, 2, 3, 4, 5, 6, 7],
@@ -74,6 +76,7 @@
     "last_scan_at": "",
     "last_fix_at": "",
     "last_schedule_date": "",
+    "last_timing_fix_at": "",
     "watch_changes": true
   },
   "navidrome": {

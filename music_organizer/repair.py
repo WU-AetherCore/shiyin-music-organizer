@@ -22,6 +22,8 @@ from .providers import (
 )
 from .providers.base import CoverHit, LyricsHit, TrackQuery
 from .textutil import (
+    analyze_lyric_timing,
+    clamp_lyric_timing,
     clean_lyrics_text,
     clean_spaces,
     collapse_cjk_spaces,
@@ -115,6 +117,40 @@ class RepairService:
     def search_covers(self, track: Dict[str, Any], limit: int = 10):
         return provider_search_covers(self.query_for(track), self.config, limit=limit)
 
+    @staticmethod
+    def _timing_rank(timing: Dict[str, Any]) -> int:
+        status = str(timing.get("status") or "")
+        if status == "ok":
+            return 3
+        if status == "suspect":
+            return 2
+        if status == "broken":
+            return 1
+        return 0
+
+    def _choose_timing_lyrics(
+        self,
+        hits: Iterable[LyricsHit],
+        duration: float,
+        min_score: float,
+    ) -> Optional[LyricsHit]:
+        """在候选里优先选择时间轴与音频时长最吻合的一版。"""
+        best: Optional[LyricsHit] = None
+        best_key = (-1, -1.0, -1.0, 0)
+        for hit in hits:
+            if hit.score < min_score or not (hit.text or "").strip():
+                continue
+            timing = analyze_lyric_timing(hit.text, duration)
+            rank = self._timing_rank(timing)
+            coverage = float(timing.get("coverage") or 0)
+            # 覆盖率越接近 1 越好；超过 1 的 overrun 已在 rank 中降级。
+            fit = 1.0 - min(1.0, abs(coverage - 0.92))
+            key = (rank, round(fit, 3), float(hit.score), len(timing.get("issues") or []))
+            if key > best_key:
+                best_key = key
+                best = hit
+        return best
+
     # ------------------------------------------------------------------
     def repair(
         self,
@@ -137,6 +173,9 @@ class RepairService:
             return outcome
 
         fresh = audio.read_meta(path)
+        duration = float(fresh.get("duration") or track.get("duration") or 0)
+        timing_before = analyze_lyric_timing(fresh.get("lyrics_text", ""), duration)
+        timing_bad = bool(fresh.get("has_lyrics") and timing_before.get("needs_fix"))
         query = build_query({**track, **fresh, "filename": fresh.get("filename") or track.get("filename")})
         wants_lyrics = "lyrics" in target_list
         wants_cover = "cover" in target_list
@@ -146,6 +185,7 @@ class RepairService:
             force
             or not fresh.get("lyrics_text", "").strip()
             or bool(self.config.get("repair.overwrite_lyrics", False))
+            or (timing_bad and bool(self.config.get("repair.fix_timing", True)))
         )
         need_cover = wants_cover and (
             force
@@ -165,7 +205,22 @@ class RepairService:
                 outcome.message = "已取消"
                 return outcome
             report = provider_search_lyrics(query, self.config, limit=10)
-            lyrics_hit = choose_best_lyrics(report.hits, min_score)
+            if timing_bad:
+                candidate = self._choose_timing_lyrics(report.hits, duration, min_score)
+                if candidate is not None:
+                    candidate_timing = analyze_lyric_timing(candidate.text, duration)
+                    current_rank = self._timing_rank(timing_before)
+                    candidate_rank = self._timing_rank(candidate_timing)
+                    better = candidate_rank > current_rank or (
+                        candidate_rank == current_rank
+                        and int(candidate_timing.get("lines") or 0) > int(timing_before.get("lines") or 0)
+                        and float(candidate_timing.get("last") or 0) <= duration + 3
+                    )
+                    if not better:
+                        candidate = None
+                lyrics_hit = candidate
+            else:
+                lyrics_hit = choose_best_lyrics(report.hits, min_score)
             outcome.lyrics = {
                 "requested": True,
                 "found": bool(lyrics_hit),
@@ -174,6 +229,7 @@ class RepairService:
                 "score": lyrics_hit.score if lyrics_hit else 0,
                 "synced": lyrics_hit.synced if lyrics_hit else False,
                 "candidate": _hit_brief(lyrics_hit) if lyrics_hit else None,
+                "timing_before": timing_before,
             }
         cover_report = None
         if need_cover:
@@ -262,6 +318,32 @@ class RepairService:
                 outcome.lyrics["found"] = False
                 outcome.lyrics["error"] = "只有纯文本歌词（已禁用）"
                 lyrics_text = ""
+        if timing_bad and need_lyrics and not lyrics_text:
+            # 没有更好的候选时，只对“轻微超出结尾”做保守校准，不猜测缺失内容。
+            codes = {item.get("code") for item in (timing_before.get("issues") or [])}
+            if (
+                "overrun" in codes
+                and "truncated" not in codes
+                and 0 < float(timing_before.get("last") or 0) - duration <= 15
+            ):
+                clamped = clamp_lyric_timing(fresh.get("lyrics_text", ""), duration)
+                if clamped.strip() and clamped != fresh.get("lyrics_text"):
+                    lyrics_text = clamped
+                    outcome.lyrics["found"] = True
+                    outcome.lyrics["provider"] = "本地时间轴校准"
+                    outcome.lyrics["normalized"] = True
+        if timing_bad and need_lyrics and lyrics_text and lyrics_hit is not None:
+            candidate_timing = analyze_lyric_timing(lyrics_text, duration)
+            codes = {item.get("code") for item in (candidate_timing.get("issues") or [])}
+            if (
+                "overrun" in codes
+                and "truncated" not in codes
+                and 0 < float(candidate_timing.get("last") or 0) - duration <= 15
+            ):
+                clamped = clamp_lyric_timing(lyrics_text, duration)
+                if clamped.strip() and clamped != lyrics_text:
+                    lyrics_text = clamped
+                    outcome.lyrics["normalized"] = True
 
         tag_patch = self._tag_patch(fresh, lyrics_hit or cover_hit) if wants_tags else {}
         # 即使没有勾选“补全标签”，也修正 track 04 / Audio 3 这类占位标题
@@ -317,6 +399,13 @@ class RepairService:
         verify_lyrics, _ = audio.read_lyrics(path)
         verify_cover = audio.read_cover(path)
 
+        timing_after = analyze_lyric_timing(verify_lyrics, duration)
+        if lyrics_text:
+            outcome.lyrics["timing_after"] = timing_after
+            outcome.lyrics["timing_fixed"] = bool(
+                timing_before.get("needs_fix") and not timing_after.get("needs_fix")
+            )
+
         if lyrics_text:
             outcome.lyrics.update(
                 {
@@ -360,6 +449,12 @@ class RepairService:
         else:
             outcome.status = "fixed"
             outcome.message = "修复完成"
+        if timing_before.get("needs_fix") and outcome.lyrics.get("applied"):
+            if timing_after.get("needs_fix"):
+                outcome.status = "partial"
+                outcome.message = "歌词已更新，但时间轴仍需人工确认"
+            else:
+                outcome.message = "歌词时间轴已自动校准"
         outcome.elapsed = time.time() - started
 
         detail_parts = []

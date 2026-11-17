@@ -34,7 +34,7 @@ except Exception:  # pragma: no cover
     Image = None  # type: ignore
     ImageOps = None  # type: ignore
 
-from .textutil import clean_spaces, count_timestamps, guess_tag_issues
+from .textutil import analyze_lyric_timing, clean_spaces, count_timestamps, guess_tag_issues
 
 READABLE_EXTS = {
     ".flac",
@@ -645,6 +645,10 @@ def read_meta(path: str | Path) -> Dict[str, Any]:
     info["lyrics_source"] = source
     info["lyrics_synced"] = count_timestamps(lyrics) >= 3
     info["has_lyrics"] = bool(lyrics.strip())
+    timing = analyze_lyric_timing(lyrics, float(info.get("duration") or 0))
+    info["lyrics_timing_status"] = timing["status"]
+    info["lyrics_timing_issues"] = timing["issues"]
+    info["lyrics_timing"] = timing
 
     cover = read_cover(p)
     if cover:

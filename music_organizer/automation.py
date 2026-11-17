@@ -50,6 +50,7 @@ class Automation:
         self._signature = ""
         self._changed_at: Optional[datetime] = None
         self._startup_scan_done = False
+        self._timing_audited = False
         self._started_at = datetime.now()
         self._last_error = ""
         self._last_tick = ""
@@ -87,6 +88,8 @@ class Automation:
             self._startup(now)
             self._watch_changes(now)
             self._interval_scan(now)
+            self._audit_timing(now)
+            self._auto_timing_fix(now)
             self._scheduled_fix(now)
 
     def _scan_running(self) -> bool:
@@ -122,6 +125,56 @@ class Automation:
         if not parsed:
             return 999.0
         return max(0.0, (now - parsed).total_seconds() / 3600.0)
+
+    def _audit_timing(self, now: datetime) -> None:
+        """旧库升级后补齐时间轴字段；只做一次，避免每 20 秒读全库。"""
+        if self._timing_audited or self._scan_running():
+            return
+        self._timing_audited = True
+        try:
+            result = scanner.audit_lyrics_timing(self.config, self.paths)
+            if result.get("issues"):
+                db.log_activity(
+                    "歌词时间轴检查",
+                    "warn",
+                    f"发现 {result['issues']} 首时间轴异常",
+                    source="auto",
+                    paths=self.paths,
+                )
+        except Exception as exc:
+            self._timing_audited = False
+            self._last_error = str(exc)
+
+    def _auto_timing_fix(self, now: datetime) -> None:
+        if not self.config.get("automation.auto_fix_timing", True):
+            return
+        if self._fix_running() or self._scan_running():
+            return
+        last = _parse_iso(str(self.config.get("automation.last_timing_fix_at") or ""))
+        if last and now - last < timedelta(hours=1):
+            return
+        ids = db.ids_for_filter("bad_lyrics", limit=20, paths=self.paths)
+        if not ids:
+            return
+        self.config.set("automation.last_timing_fix_at", now.isoformat(timespec="seconds")).save()
+        jobs.start_batch(
+            self.config,
+            self.paths,
+            self.manager,
+            ids=ids,
+            targets=["lyrics"],
+            force=True,
+            source="auto-timing",
+            title=f"自动校准歌词时间轴 · {len(ids)} 首",
+        )
+        db.log_activity(
+            "自动校准歌词时间轴",
+            "ok",
+            f"已排队 {len(ids)} 首",
+            source="auto",
+            paths=self.paths,
+        )
+
 
     def _watch_changes(self, now: datetime) -> None:
         if not self.config.get("automation.watch_enabled", True):

@@ -418,6 +418,127 @@ def count_timestamps(text: str) -> int:
     return len(_LRC_TIME_RE.findall(text or ""))
 
 
+def analyze_lyric_timing(text: str, duration: float = 0.0) -> Dict[str, Any]:
+    """检查逐行歌词的时间轴是否明显对不上音频。
+
+    这是可解释的几何检查，不依赖音频指纹：
+    - 时间戳为负、顺序明显错乱；
+    - 最后一行超过音频结尾太多；
+    - 时长很长的歌，歌词只覆盖到很靠前的位置（典型的不完整歌词）；
+    - 开头时间晚得离谱；
+    - 非零 ``[offset:]`` 标签（播放器默认不会自动应用）。
+
+    ``status`` 为 ok / suspect / broken / plain / empty；suspect 与 broken
+    会进入修复列表，不会静默破坏原歌词。
+    """
+    raw = (text or "").replace("\r\n", "\n").replace("\r", "\n")
+    parsed = parse_lrc(raw)
+    lines = parsed.get("lines") or []
+    duration = max(0.0, float(duration or 0))
+    if not raw.strip():
+        return {
+            "status": "empty",
+            "needs_fix": False,
+            "issues": [],
+            "lines": 0,
+            "first": 0.0,
+            "last": 0.0,
+            "duration": round(duration, 1),
+            "coverage": 0.0,
+            "message": "无歌词",
+        }
+    if len(lines) < 2:
+        return {
+            "status": "plain",
+            "needs_fix": False,
+            "issues": [],
+            "lines": len(lines),
+            "first": 0.0,
+            "last": 0.0,
+            "duration": round(duration, 1),
+            "coverage": 0.0,
+            "message": "纯文本歌词（无时间轴）",
+        }
+
+    times = [float(line.get("time") or 0) for line in lines]
+    first = min(times)
+    last = max(times)
+    issues: List[Dict[str, str]] = []
+
+    def add(code: str, label: str) -> None:
+        issues.append({"code": code, "label": label})
+
+    offset = str(parsed.get("meta", {}).get("offset") or "").strip()
+    if offset not in ("", "0", "+0", "-0"):
+        add("offset", f"歌词带 [offset:{offset}]，播放器默认不会自动应用")
+
+    # parse_lrc 会排序，原始文件顺序需要单独检查。
+    raw_times: List[float] = []
+    for line in raw.split("\n"):
+        for stamp in _LRC_TIME_RE.finditer(line):
+            value = _parse_timestamp(stamp.group(1), stamp.group(2), stamp.group(3))
+            if value is not None:
+                raw_times.append(value)
+    inversions = sum(1 for a, b in zip(raw_times, raw_times[1:]) if b + 0.5 < a)
+    if inversions > max(2, len(raw_times) // 10):
+        add("out_of_order", f"时间轴有 {inversions} 处明显逆序")
+
+    if first < -0.1:
+        add("negative", "存在负数时间轴")
+
+    coverage = (last / duration) if duration else 0.0
+    broken = False
+    if duration >= 30 and last > duration + 3:
+        over = last - duration
+        add("overrun", f"最后一行超出音频结尾约 {over:.0f} 秒")
+        broken = broken or over > 15
+    if duration >= 60 and coverage < 0.45:
+        add("truncated", f"歌词只覆盖到 {coverage * 100:.0f}%，可能不完整")
+        broken = True
+    if duration >= 120 and first > duration * 0.45:
+        add("late_start", f"第一行从 {first:.0f} 秒才开始，可能整体偏晚")
+    if len(times) < 5 and duration >= 60:
+        add("few_lines", f"只有 {len(times)} 行时间轴，明显偏少")
+        broken = True
+
+    status = "broken" if broken or any(i["code"] == "negative" for i in issues) else (
+        "suspect" if issues else "ok"
+    )
+    if status == "ok":
+        message = "时间轴正常"
+    elif status == "broken":
+        message = "时间轴明显异常，建议重新匹配"
+    else:
+        message = "时间轴可能有问题"
+    return {
+        "status": status,
+        "needs_fix": status in ("broken", "suspect"),
+        "issues": issues,
+        "lines": len(lines),
+        "first": round(first, 2),
+        "last": round(last, 2),
+        "duration": round(duration, 1),
+        "coverage": round(coverage, 3),
+        "message": message,
+    }
+
+
+def clamp_lyric_timing(text: str, duration: float = 0.0) -> str:
+    """把超出音频结尾的时间轴压回结尾；只用于轻微 overrun。"""
+    parsed = parse_lrc(text)
+    lines = parsed.get("lines") or []
+    duration = max(0.0, float(duration or 0))
+    if not lines or duration <= 0:
+        return text
+    limit = max(0.0, duration - 0.3)
+    patched = []
+    for line in lines:
+        item = dict(line)
+        item["time"] = min(float(item.get("time") or 0), limit)
+        patched.append(item)
+    return build_lrc(patched, parsed.get("meta") or {})
+
+
 def clean_lyrics_text(text: str, simplified: bool = False) -> str:
     """统一换行、去 BOM、去 HTML 实体、按需繁转简。"""
     if not text:

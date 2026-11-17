@@ -72,6 +72,7 @@ DEFAULT_CONFIG: Dict[str, Any] = {
         "allow_plain_lyrics": True,
         "min_lyrics_chars": 20,
         "fix_placeholder_tags": True,
+        "fix_timing": True,
         "backup": True,
         "max_backups": 300,
     },
@@ -90,6 +91,7 @@ DEFAULT_CONFIG: Dict[str, Any] = {
         "watch_interval_min": 30,
         "auto_fix_new": True,
         "fix_on_play": True,
+        "auto_fix_timing": True,
         "schedule_enabled": True,
         "schedule_time": "03:30",
         "schedule_days": [1, 2, 3, 4, 5, 6, 7],
@@ -98,6 +100,7 @@ DEFAULT_CONFIG: Dict[str, Any] = {
         "last_scan_at": "",
         "last_fix_at": "",
         "last_schedule_date": "",
+        "last_timing_fix_at": "",
         "watch_changes": True,
     },
     "navidrome": {

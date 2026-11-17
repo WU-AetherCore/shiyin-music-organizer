@@ -224,3 +224,45 @@ def scan_single(path: str | Path, config: Config, paths: Optional[AppPaths] = No
     meta = audio.read_meta(target)
     track_id = db.upsert_track(meta, paths)
     return db.get_track(track_id, paths)
+
+
+def audit_lyrics_timing(
+    config: Config,
+    paths: Optional[AppPaths] = None,
+    progress: Optional[ProgressCallback] = None,
+    cancel: Optional[threading.Event] = None,
+) -> Dict[str, int]:
+    """只重算已索引歌曲的歌词时间轴状态，不重新扫描标签/封面。
+
+    用于旧数据库升级后补齐 ``lyrics_timing_*`` 字段；正常增量扫描
+    遇到文件变化也会自动更新这些字段。
+    """
+    from .textutil import analyze_lyric_timing
+
+    paths = paths or get_paths()
+    tracks = db.all_tracks(paths)
+    checked = changed = bad = 0
+    for index, track in enumerate(tracks, start=1):
+        if cancel is not None and cancel.is_set():
+            break
+        path = track.get("path") or ""
+        try:
+            text, _source = audio.read_lyrics(path)
+            timing = analyze_lyric_timing(text, float(track.get("duration") or 0))
+            status = timing.get("status") or ""
+            issues = timing.get("issues") or []
+            checked += 1
+            if status != (track.get("lyrics_timing_status") or "") or issues != (track.get("lyrics_timing_issues") or []):
+                db.update_track_media(
+                    int(track["id"]),
+                    {"lyrics_timing_status": status, "lyrics_timing_issues": issues},
+                    paths,
+                )
+                changed += 1
+            if timing.get("needs_fix"):
+                bad += 1
+        except Exception:
+            continue
+        if progress:
+            progress(index, len(tracks), path)
+    return {"checked": checked, "changed": changed, "issues": bad}

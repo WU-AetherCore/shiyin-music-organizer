@@ -416,11 +416,12 @@ function renderDashboard() {
   const coverCovered = Math.max(0, total - (s.missing_cover || 0));
   const hour = new Date().getHours();
   const hello = hour < 6 ? '夜深了' : hour < 12 ? '早上好' : hour < 18 ? '下午好' : '晚上好';
-  const pendingTotal = (s.missing_lyrics || 0) + (s.missing_cover || 0) + (s.issues || 0);
+  const pendingTotal = (s.missing_lyrics || 0) + (s.missing_cover || 0) + (s.issues || 0) + (s.timing_issues || 0);
 
   const pendingRows = [];
   if (s.missing_lyrics) pendingRows.push(pendingRow('lyrics', 'bad', '缺少歌词', '从网易云 / QQ 音乐 / LRCLIB 自动补齐并内嵌', s.missing_lyrics, 'quick-fix-filter', 'missing_lyrics'));
   if (s.missing_cover) pendingRows.push(pendingRow('image', 'warn', '缺少封面', '自动抓取专辑封面并写入音频标签', s.missing_cover, 'quick-fix-filter', 'missing_cover'));
+  if (s.timing_issues) pendingRows.push(pendingRow('alert', 'warn', '歌词时间轴异常', '逐行歌词与音频时长/位置不匹配，可自动重新匹配', s.timing_issues, 'quick-fix-filter', 'bad_lyrics'));
   if (s.issues) pendingRows.push(pendingRow('alert', 'warn', '标签异常', '标题、歌手或专辑存在占位值或缺失', s.issues, 'goto-library-filter', 'issues'));
   if (f.duplicates) pendingRows.push(pendingRow('duplicate', 'info', '重复文件', '同名同曲或内容完全相同的文件', f.duplicates, 'goto-library-filter', 'duplicates'));
   if (!pendingRows.length) {
@@ -471,7 +472,7 @@ function renderDashboard() {
               total === 0
                 ? '还没有扫描到曲目。选择一个音乐文件夹，插件会自动建立索引并检查歌词与封面。'
                 : pendingTotal > 0
-                  ? `共 ${total} 首曲目，还有 ${s.missing_lyrics || 0} 首缺歌词、${s.missing_cover || 0} 首缺封面。一次批量修复就能把它们补齐。`
+                  ? `共 ${total} 首曲目，还有 ${s.missing_lyrics || 0} 首缺歌词、${s.missing_cover || 0} 首缺封面${s.timing_issues ? `、${s.timing_issues} 首时间轴异常` : ''}。一次批量修复就能把它们补齐。`
                   : `共 ${total} 首曲目，歌词与封面都已齐全。偶尔点一次扫描，就能自动发现新加入的音乐。`
             }</p>
           </div>
@@ -610,6 +611,10 @@ function statusBadges(t) {
   } else {
     badges.push('<span class="status-mini bad" title="缺少封面">缺图</span>');
   }
+  if (['broken', 'suspect'].includes(t.lyrics_timing_status)) {
+    const detail = (t.lyrics_timing_issues || []).map((i) => i.label || '').filter(Boolean).join('；');
+    badges.push(`<span class="status-mini warn" title="${esc(detail || '歌词时间轴异常')}">轴</span>`);
+  }
   if ((t.tag_issues || []).length) {
     badges.push(`<span class="status-mini warn" title="${esc(t.tag_issues.map((i) => i.label).join('；'))}">签</span>`);
   }
@@ -664,6 +669,7 @@ function renderLibrary() {
     ['all', '全部', counts.total || l.total || 0],
     ['missing_lyrics', '缺歌词', counts.missing_lyrics || 0],
     ['missing_cover', '缺封面', counts.missing_cover || 0],
+    ['bad_lyrics', '时间轴', counts.timing_issues || 0],
     ['issues', '标签异常', counts.issues || 0],
     ['duplicates', '重复', dupCount],
     ['favorite', '收藏', counts.favorite || 0],
@@ -784,6 +790,7 @@ function renderRepair() {
   const o = state.overview;
   const s = o.stats || {};
   const status = o.automation.status || {};
+  const timingCount = Number(s.timing_issues || 0);
   const job = state.job;
   const recentJobs = (o.jobs || []).slice(0, 6).map((j) => `
     <div class="recent-job">
@@ -812,6 +819,11 @@ function renderRepair() {
         </div>
       </div>
 
+      ${timingCount ? `<div class="timing-banner">
+        <div><b>检测到 ${timingCount} 首歌词时间轴异常</b><span>歌词时间戳与音频时长/位置对不上，可自动重新匹配，不会动音频文件。</span></div>
+        <button class="btn btn-soft btn-sm" data-action="fix-timing">自动校准时间轴</button>
+      </div>` : ''}
+
       <div class="repair-grid">
         <section class="card form-card">
           <div class="card-head"><div><div class="card-title">开始修复</div><div class="card-sub">自动搜索最匹配的歌词与封面，并写入音频标签</div></div></div>
@@ -822,6 +834,7 @@ function renderRepair() {
               <button class="seg" data-scope="missing_lyrics">仅缺歌词</button>
               <button class="seg" data-scope="missing_cover">仅缺封面</button>
               <button class="seg" data-scope="issues">标签异常</button>
+              <button class="seg" data-scope="bad_lyrics">时间轴异常</button>
               <button class="seg" data-scope="all">全部重做</button>
             </div>
           </div>
@@ -899,6 +912,7 @@ function renderAutomation() {
             ${autoSwitch('watch_changes', '变化检测', '定期检查文件数量与修改时间，比全量扫描更轻量', a.watch_changes !== false)}
             ${autoSwitch('auto_fix_new', '新歌自动修复', '扫描到新歌且缺少歌词/封面时，自动排队修复', a.auto_fix_new)}
             ${autoSwitch('fix_on_play', '播放时自动修复', '在 Web 播放器里播放缺内容的歌时自动补齐', a.fix_on_play)}
+            ${autoSwitch('auto_fix_timing', '时间轴自动校准', '扫描发现歌词与音频时间对不上时自动重新匹配', a.auto_fix_timing !== false)}
             ${autoSwitch('schedule_enabled', '每日自动修复', '每天固定时间批量处理缺失的歌词与封面', a.schedule_enabled)}
           </div>
         </section>
@@ -1719,8 +1733,10 @@ async function openTrack(id) {
         <div class="td-section">
           <div class="td-section-title">歌词 ${t.lyrics && t.lyrics.source ? '· ' + (t.lyrics.source === 'embed' ? '内嵌标签' : t.lyrics.source === 'lrc' ? '外挂 LRC' : esc(t.lyrics.source)) : ''}</div>
           <div class="td-lyrics">${lyricsText ? esc(lyricsText.slice(0, 3000)) : '<span class="dim">暂无歌词</span>'}</div>
+          ${['broken', 'suspect'].includes(t.lyrics_timing_status) ? `<div class="modal-note" style="color:var(--warn);margin-top:8px">时间轴异常：${esc((t.lyrics_timing_issues || []).map((i) => i.label || '').filter(Boolean).join('；') || '歌词与音频时长不匹配')}</div>` : ''}
           <div style="display:flex;gap:8px;margin-top:10px">
             <button class="btn btn-ghost btn-sm" data-action="edit-lyrics" data-id="${t.id}">编辑歌词</button>
+            <button class="btn btn-ghost btn-sm" data-action="repair-track" data-targets="lyrics" data-id="${t.id}">重新匹配时间轴</button>
             <button class="btn btn-ghost btn-sm" data-action="offset-reset" data-id="${t.id}">重置偏移</button>
           </div>
         </div>
@@ -2192,9 +2208,13 @@ async function handleAction(action, el, event) {
       break;
     case 'quick-fix-filter': {
       const filter = el.dataset.filter || 'missing_any';
-      await startBatch(filter, ['lyrics', 'cover']);
+      if (filter === 'bad_lyrics') await startBatch('bad_lyrics', ['lyrics'], { force: true });
+      else await startBatch(filter, ['lyrics', 'cover']);
       break;
     }
+    case 'fix-timing':
+      await startBatch('bad_lyrics', ['lyrics'], { force: true });
+      break;
     case 'start-quick-fix':
       await startBatch('missing_any', ['lyrics', 'cover']);
       break;
@@ -2421,9 +2441,9 @@ async function handleAction(action, el, event) {
       if ($('#targetTags') && $('#targetTags').checked) targets.push('tags');
       if (!targets.length) { toast('请至少选择一个修复目标', 'err'); return; }
       const limit = Number($('#repairLimit') ? $('#repairLimit').value : 0) || 0;
-      await startBatch(scope, targets, {
+      await startBatch(scope, scope === 'bad_lyrics' ? ['lyrics'] : targets, {
         limit,
-        force: $('#repairForce') ? $('#repairForce').checked : false,
+        force: scope === 'bad_lyrics' || ($('#repairForce') ? $('#repairForce').checked : false),
         dryRun: $('#repairDry') ? $('#repairDry').checked : false,
       });
       break;

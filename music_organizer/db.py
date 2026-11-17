@@ -17,7 +17,7 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 from .paths import AppPaths, get_paths
 from .textutil import normalize_key
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS tracks (
@@ -45,6 +45,8 @@ CREATE TABLE IF NOT EXISTS tracks (
     lyrics_source TEXT NOT NULL DEFAULT '',
     lyrics_synced INTEGER NOT NULL DEFAULT 0,
     lyrics_len INTEGER NOT NULL DEFAULT 0,
+    lyrics_timing_status TEXT NOT NULL DEFAULT '',
+    lyrics_timing_issues TEXT NOT NULL DEFAULT '[]',
     has_cover INTEGER NOT NULL DEFAULT 0,
     cover_source TEXT NOT NULL DEFAULT '',
     cover_mime TEXT NOT NULL DEFAULT '',
@@ -140,6 +142,8 @@ def _ensure_columns(conn: sqlite3.Connection) -> None:
         "last_repair_status": "TEXT NOT NULL DEFAULT ''",
         "lyrics_offset_ms": "INTEGER NOT NULL DEFAULT 0",
         "favorite": "INTEGER NOT NULL DEFAULT 0",
+        "lyrics_timing_status": "TEXT NOT NULL DEFAULT ''",
+        "lyrics_timing_issues": "TEXT NOT NULL DEFAULT '[]'",
     }
     for name, ddl in additions.items():
         if name not in existing:
@@ -208,6 +212,8 @@ _TRACK_COLUMNS = [
     "lyrics_source",
     "lyrics_synced",
     "lyrics_len",
+    "lyrics_timing_status",
+    "lyrics_timing_issues",
     "has_cover",
     "cover_source",
     "cover_mime",
@@ -226,6 +232,9 @@ def upsert_track(meta: Dict[str, Any], paths: Optional[AppPaths] = None) -> int:
     issues = meta.get("tag_issues") or []
     if not isinstance(issues, str):
         issues = json.dumps(issues, ensure_ascii=False)
+    timing_issues = meta.get("lyrics_timing_issues") or []
+    if not isinstance(timing_issues, str):
+        timing_issues = json.dumps(timing_issues, ensure_ascii=False)
     values = {
         "path": str(meta.get("path") or ""),
         "dir": str(meta.get("dir") or ""),
@@ -250,6 +259,8 @@ def upsert_track(meta: Dict[str, Any], paths: Optional[AppPaths] = None) -> int:
         "lyrics_source": str(meta.get("lyrics_source") or ""),
         "lyrics_synced": int(bool(meta.get("lyrics_synced"))),
         "lyrics_len": len(lyrics),
+        "lyrics_timing_status": str(meta.get("lyrics_timing_status") or ""),
+        "lyrics_timing_issues": timing_issues,
         "has_cover": int(bool(meta.get("has_cover"))),
         "cover_source": str(meta.get("cover_source") or ""),
         "cover_mime": str(meta.get("cover_mime") or ""),
@@ -294,6 +305,8 @@ def update_track_media(track_id: int, fields: Dict[str, Any], paths: Optional[Ap
         "lyrics_source",
         "lyrics_synced",
         "lyrics_len",
+        "lyrics_timing_status",
+        "lyrics_timing_issues",
         "has_cover",
         "cover_source",
         "cover_mime",
@@ -320,6 +333,8 @@ def update_track_media(track_id: int, fields: Dict[str, Any], paths: Optional[Ap
         return
     if "tag_issues" in patch and not isinstance(patch["tag_issues"], str):
         patch["tag_issues"] = json.dumps(patch["tag_issues"], ensure_ascii=False)
+    if "lyrics_timing_issues" in patch and not isinstance(patch["lyrics_timing_issues"], str):
+        patch["lyrics_timing_issues"] = json.dumps(patch["lyrics_timing_issues"], ensure_ascii=False)
     assignments = ", ".join(f"{k}=?" for k in patch)
     with get_conn(paths) as conn:
         conn.execute(f"UPDATE tracks SET {assignments} WHERE id=?", list(patch.values()) + [track_id])
@@ -369,6 +384,10 @@ def _row_to_dict(row: sqlite3.Row) -> Dict[str, Any]:
         data["tag_issues"] = json.loads(data.get("tag_issues") or "[]")
     except json.JSONDecodeError:
         data["tag_issues"] = []
+    try:
+        data["lyrics_timing_issues"] = json.loads(data.get("lyrics_timing_issues") or "[]")
+    except json.JSONDecodeError:
+        data["lyrics_timing_issues"] = []
     return data
 
 
@@ -411,6 +430,8 @@ _FILTER_SQL = {
     "favorite": "favorite=1",
     "unsynced_lyrics": "has_lyrics=1 AND lyrics_synced=0",
     "no_embedded_cover": "has_cover=1 AND cover_source!='embed'",
+    "bad_lyrics": "has_lyrics=1 AND lyrics_timing_status IN ('broken','suspect')",
+    "lyrics_timing": "has_lyrics=1 AND lyrics_timing_status IN ('broken','suspect')",
 }
 
 _SORT_SQL = {
@@ -482,6 +503,7 @@ def stats(paths: Optional[AppPaths] = None) -> Dict[str, Any]:
               COALESCE(SUM(CASE WHEN tag_issues NOT IN ('[]','') THEN 1 ELSE 0 END), 0) AS issues,
               COALESCE(SUM(CASE WHEN health='error' THEN 1 ELSE 0 END), 0) AS errors,
               COALESCE(SUM(CASE WHEN has_lyrics=1 AND lyrics_synced=1 THEN 1 ELSE 0 END), 0) AS synced_lyrics,
+              COALESCE(SUM(CASE WHEN has_lyrics=1 AND lyrics_timing_status IN ('broken','suspect') THEN 1 ELSE 0 END), 0) AS timing_issues,
               COALESCE(SUM(CASE WHEN has_cover=1 AND cover_source='embed' THEN 1 ELSE 0 END), 0) AS embedded_covers
             FROM tracks
             """
@@ -499,6 +521,7 @@ def stats(paths: Optional[AppPaths] = None) -> Dict[str, Any]:
     missing_lyrics = int(row["missing_lyrics"] or 0)
     issues = int(row["issues"] or 0)
     errors = int(row["errors"] or 0)
+    timing_issues = int(row["timing_issues"] or 0)
 
     penalty = 0.0
     if total:
@@ -506,6 +529,7 @@ def stats(paths: Optional[AppPaths] = None) -> Dict[str, Any]:
         penalty += (missing_lyrics / total) * 22
         penalty += (issues / total) * 12
         penalty += (errors / total) * 15
+        penalty += (timing_issues / total) * 8
     health_score = max(0, min(100, round(100 - penalty)))
 
     return {
@@ -520,6 +544,7 @@ def stats(paths: Optional[AppPaths] = None) -> Dict[str, Any]:
         "issues": issues,
         "errors": errors,
         "synced_lyrics": int(row["synced_lyrics"] or 0),
+        "timing_issues": timing_issues,
         "embedded_covers": int(row["embedded_covers"] or 0),
         "health_score": health_score,
         "formats": [
@@ -537,6 +562,7 @@ def filter_counts(paths: Optional[AppPaths] = None) -> Dict[str, int]:
               SUM(CASE WHEN has_cover=0 THEN 1 ELSE 0 END) AS missing_cover,
               SUM(CASE WHEN has_lyrics=0 THEN 1 ELSE 0 END) AS missing_lyrics,
               SUM(CASE WHEN tag_issues NOT IN ('[]','') THEN 1 ELSE 0 END) AS issues,
+              SUM(CASE WHEN has_lyrics=1 AND lyrics_timing_status IN ('broken','suspect') THEN 1 ELSE 0 END) AS timing_issues,
               SUM(CASE WHEN favorite=1 THEN 1 ELSE 0 END) AS favorite
             FROM tracks
             """

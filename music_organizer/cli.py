@@ -59,6 +59,10 @@ FILTER_ALIASES = {
     "fav": "favorite",
     "favorite": "favorite",
     "unsynced": "unsynced_lyrics",
+    "bad-lyrics": "bad_lyrics",
+    "bad_lyrics": "bad_lyrics",
+    "timing": "bad_lyrics",
+    "lyrics_timing": "bad_lyrics",
     "no-embed-cover": "no_embedded_cover",
     "duplicates": "duplicates",
     "ok": "ok",
@@ -283,6 +287,7 @@ def _cmd_init(args: argparse.Namespace, ctx: Ctx) -> int:
     stats = db.stats(ctx.paths)
     ctx.console.info(
         f"  缺歌词 {stats['missing_lyrics']} 首，缺封面 {stats['missing_cover']} 首，"
+        f"时间轴异常 {stats.get('timing_issues', 0)} 首，"
         f"健康度 {stats['health_score']}/100"
     )
     ctx.console.info("")
@@ -343,6 +348,7 @@ def _cmd_status(args: argparse.Namespace, ctx: Ctx) -> int:
     ctx.console.key("健康度", f"{stats['health_score']}/100")
     ctx.console.key("缺歌词", f"{stats['missing_lyrics']} 首")
     ctx.console.key("缺封面", f"{stats['missing_cover']} 首")
+    ctx.console.key("时间轴异常", f"{stats.get('timing_issues', 0)} 首")
     ctx.console.key("标签异常", f"{stats['issues']} 首")
     ctx.console.key("扫描时间", last_scan or "从未")
     ctx.console.key("修复时间", automation.get("last_fix_at") or "从未")
@@ -555,6 +561,7 @@ def _cmd_check(args: argparse.Namespace, ctx: Ctx) -> int:
     ctx.console.key("缺歌词", f"{stats['missing_lyrics']} 首")
     ctx.console.key("缺封面", f"{stats['missing_cover']} 首")
     ctx.console.key("歌词未内嵌", f"{stats['total'] - stats['synced_lyrics'] - stats['missing_lyrics']} 首（仅有纯文本或外挂）")
+    ctx.console.key("时间轴异常", f"{stats.get('timing_issues', 0)} 首")
     ctx.console.key("标签异常", f"{stats['issues']} 首")
     ctx.console.key("损坏/读取失败", f"{stats['errors']} 首")
     ctx.console.key("重复文件", f"{dup_count} 首（{len(dup_groups)} 组）")
