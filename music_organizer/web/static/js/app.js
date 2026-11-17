@@ -2681,6 +2681,12 @@ function bindEvents() {
   buildEqBars();
   document.addEventListener('click', (event) => {
     if (event.target.matches('input[type="checkbox"]')) return;
+    const scope = event.target.closest('#scopeChips .seg');
+    if (scope) {
+      document.querySelectorAll('#scopeChips .seg').forEach((item) => item.classList.remove('active'));
+      scope.classList.add('active');
+      return;
+    }
     const el = event.target.closest('[data-action]');
     if (!el) return;
     const action = el.dataset.action;
