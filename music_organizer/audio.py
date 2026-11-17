@@ -1157,6 +1157,21 @@ def write_lrc_sidecar(path: str | Path, lyrics: str) -> str:
     return str(target)
 
 
+def sync_lrc_sidecar(path: str | Path, lyrics: str) -> Optional[str]:
+    """把内嵌歌词同步成同名 ``.lrc``，内容相同则不重复写。"""
+    text = str(lyrics or "")
+    if not text.strip():
+        return None
+    p = Path(path)
+    target = p.with_suffix(".lrc")
+    try:
+        if target.is_file() and target.read_text(encoding="utf-8", errors="replace") == text:
+            return str(target)
+    except OSError:
+        pass
+    return write_lrc_sidecar(p, text)
+
+
 def write_cover_sidecar(path: str | Path, data: bytes) -> str:
     """写入与歌曲同名的封面文件（``歌曲.jpg``），避免覆盖目录里其他专辑的封面。"""
     p = Path(path)

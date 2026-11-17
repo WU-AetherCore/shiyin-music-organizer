@@ -277,6 +277,10 @@ def start_scan(config: Config, paths: Optional[AppPaths] = None, manager: Option
         job.log(job.message)
         config.set("automation.last_scan_at", _now()).save()
         try:
+            _notify_media_servers(config, paths, manager, job)
+        except Exception as exc:
+            job.log(f"媒体服务器同步失败：{exc}")
+        try:
             _auto_fix_new(config, paths, manager, result.new_ids)
         except Exception as exc:
             job.log(f"自动修复排队失败：{exc}")

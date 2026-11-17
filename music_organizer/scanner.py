@@ -173,6 +173,11 @@ def scan_library(
         try:
             meta = audio.read_meta(path)
             track_id = db.upsert_track(meta, paths)
+            if config.get("repair.write_lrc"):
+                try:
+                    audio.sync_lrc_sidecar(path, str(meta.get("lyrics_text") or ""))
+                except Exception:
+                    pass
             if previous is None:
                 result.added += 1
                 result.new_ids.append(track_id)
@@ -215,7 +220,12 @@ def scan_library(
     return result
 
 
-def scan_single(path: str | Path, config: Config, paths: Optional[AppPaths] = None) -> Optional[Dict[str, object]]:
+def scan_single(
+    path: str | Path,
+    config: Config,
+    paths: Optional[AppPaths] = None,
+    write_lrc: Optional[bool] = None,
+) -> Optional[Dict[str, object]]:
     """重新扫描单个文件（修复后刷新索引）。"""
     paths = paths or get_paths()
     target = Path(path)
@@ -223,6 +233,12 @@ def scan_single(path: str | Path, config: Config, paths: Optional[AppPaths] = No
         return None
     meta = audio.read_meta(target)
     track_id = db.upsert_track(meta, paths)
+    should_write_lrc = bool(config.get("repair.write_lrc")) if write_lrc is None else bool(write_lrc)
+    if should_write_lrc:
+        try:
+            audio.sync_lrc_sidecar(target, str(meta.get("lyrics_text") or ""))
+        except Exception:
+            pass
     return db.get_track(track_id, paths)
 
 

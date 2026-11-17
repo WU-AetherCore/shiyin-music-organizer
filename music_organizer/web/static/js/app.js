@@ -1634,7 +1634,7 @@ function renderSettings() {
           ${settingRow('繁转简', '把繁体歌词转换为简体中文（需要 zhconv）', `<label class="toggle"><input type="checkbox" data-setting="repair.simplified" ${cfg.repair.simplified ? 'checked' : ''}><span></span></label>`)}
           ${settingRow('允许纯文本歌词', '没有时间轴的歌词也写入（播放器将静态显示）', `<label class="toggle"><input type="checkbox" data-setting="repair.allow_plain_lyrics" ${cfg.repair.allow_plain_lyrics ? 'checked' : ''}><span></span></label>`)}
           ${settingRow('最少字符数', '低于该长度的歌词视为无效', `<input class="input" type="number" min="5" max="500" data-setting="repair.min_lyrics_chars" value="${cfg.repair.min_lyrics_chars}">`)}
-          ${settingRow('同时写入 .lrc', '在歌曲旁边生成同名歌词文件', `<label class="toggle"><input type="checkbox" data-setting="repair.write_lrc" ${cfg.repair.write_lrc ? 'checked' : ''}><span></span></label>`)}
+          ${settingRow('同时写入 .lrc', '在歌曲旁边生成同名外置歌词；Jellyfin 显示歌词需要（默认开启）', `<label class="toggle"><input type="checkbox" data-setting="repair.write_lrc" ${cfg.repair.write_lrc ? 'checked' : ''}><span></span></label>`)}
           ${settingRow('自动修正占位标题', 'track 04 / Audio 3 等占位标题按候选自动修正', `<label class="toggle"><input type="checkbox" data-setting="repair.fix_placeholder_tags" ${cfg.repair.fix_placeholder_tags ? 'checked' : ''}><span></span></label>`)}
           ${settingRow('覆盖已有歌词', '修复时替换已有歌词（手动修复总是可以覆盖）', `<label class="toggle"><input type="checkbox" data-setting="repair.overwrite_lyrics" ${cfg.repair.overwrite_lyrics ? 'checked' : ''}><span></span></label>`)}
           <p class="settings-note">当前 ${stats.synced_lyrics ?? '—'} 首逐行歌词 · ${lyricsCoverage}% 歌词覆盖；内嵌优先，播放器会直接读取音频标签。</p>`)}

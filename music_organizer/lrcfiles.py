@@ -171,7 +171,7 @@ def clean_lrc_files(
                 try:
                     from . import scanner
 
-                    scanner.scan_single(entry.audio_path, config, paths)
+                    scanner.scan_single(entry.audio_path, config, paths, write_lrc=False)
                 except Exception:
                     pass
         except OSError as exc:

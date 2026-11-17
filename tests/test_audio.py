@@ -130,3 +130,15 @@ def test_update_media_takes_over_unwritable_file(flac, monkeypatch):
     monkeypatch.setattr(audio.os, "access", fake_access)
     audio.update_media(flac, lyrics="接管权限后的歌词\n")
     assert "接管权限后的歌词" in audio.read_lyrics(flac)[0]
+
+
+def test_scan_writes_lrc_sidecar(env):
+    from music_organizer import scanner
+
+    path = next(env["music"].glob("*.flac"))
+    audio.update_media(path, lyrics="[00:01.00]外置歌词测试\n")
+    env["config"].set("repair.write_lrc", True)
+    scanner.scan_single(path, env["config"], env["paths"])
+    sidecar = path.with_suffix(".lrc")
+    assert sidecar.is_file()
+    assert "外置歌词测试" in sidecar.read_text(encoding="utf-8")

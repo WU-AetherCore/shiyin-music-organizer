@@ -44,7 +44,7 @@
     "min_cover_size": 300,
     "max_cover_size": 1280,
     "jpeg_quality": 90,
-    "write_lrc": false,
+    "write_lrc": true,
     "write_cover_file": false,
     "simplified": true,
     "allow_plain_lyrics": true,

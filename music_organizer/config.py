@@ -68,7 +68,7 @@ DEFAULT_CONFIG: Dict[str, Any] = {
         "min_cover_size": 300,
         "max_cover_size": 1280,
         "jpeg_quality": 90,
-        "write_lrc": False,
+        "write_lrc": True,
         "write_cover_file": False,
         "simplified": True,
         "allow_plain_lyrics": True,
