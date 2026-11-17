@@ -67,6 +67,7 @@ def test_organize_preview_and_apply_then_restore(env):
     assert restored["restored"] >= 1
     assert not restored["missing"]
     assert (env["music"] / next(env["music"].glob("*.flac")).name).is_file()
+    assert not any(path.is_dir() and not any(path.iterdir()) for path in env["music"].rglob("*"))
 
 
 def test_text_edit_and_undo(env):

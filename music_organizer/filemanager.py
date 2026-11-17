@@ -176,9 +176,14 @@ class FileManager:
             return
         root = self._root()
         entries: List[Dict[str, Any]] = []
+        dirs_found: List[str] = []
         for current, dirs, names in os.walk(str(root)):
             dirs[:] = sorted(d for d in dirs if not d.startswith("."))
             base = Path(current)
+            for name in dirs:
+                folder = base / name
+                if not folder.is_symlink():
+                    dirs_found.append(self._rel(folder))
             for name in sorted(names):
                 if name.startswith("."):
                     continue
@@ -209,6 +214,7 @@ class FileManager:
                 "root": str(root),
                 "created_at": _now(),
                 "entries": entries,
+                "dirs": sorted(dirs_found),
             },
         )
 
@@ -968,6 +974,7 @@ class FileManager:
                     f"处理 {applied} 个文件",
                     inverses,
                 )
+            self._prune_empty_dirs()
             plan_path.unlink(missing_ok=True)
             return {"applied": applied, "skipped": skipped, "errors": errors, "plan_id": plan_id}
 
@@ -984,6 +991,8 @@ class FileManager:
                     item["undone"] = not errors
                     item["undo_errors"] = errors
                     self._save_json(self._history_path(), data)
+                    if item.get("action") in ("一键整理", "批量命名", "移动"):
+                        self._prune_empty_dirs()
                     return {"undone": bool(not errors), "action": item.get("action"), "errors": errors}
             raise FileManagerError("没有可撤销的操作")
 
@@ -996,6 +1005,7 @@ class FileManager:
                 raise FileManagerError("操作记录不存在")
             errors = []
             undone = 0
+            did_tree = False
             for item in reversed(items[target_index:]):
                 if not item.get("undoable") or item.get("undone"):
                     continue
@@ -1006,7 +1016,10 @@ class FileManager:
                 else:
                     item["undone"] = True
                     undone += 1
+                    did_tree = did_tree or item.get("action") in ("一键整理", "批量命名", "移动")
             self._save_json(self._history_path(), data)
+            if did_tree:
+                self._prune_empty_dirs()
             return {"undone": undone, "errors": errors}
 
     def restore_original(self) -> Dict[str, Any]:
@@ -1109,11 +1122,41 @@ class FileManager:
                 [],
                 undoable=False,
             )
+            original_dirs = original.get("dirs") or sorted(
+                {
+                    str(Path(str(entry.get("path") or "")).parent)
+                    for entry in entries
+                    if str(Path(str(entry.get("path") or "")).parent) not in ("", ".")
+                }
+            )
+            self._prune_empty_dirs()
+            for rel_dir in original_dirs:
+                try:
+                    target = self._resolve(str(rel_dir))
+                    target.mkdir(parents=True, exist_ok=True)
+                except Exception:
+                    pass
             return {"restored": restored, "missing": missing, "extras": extras, "errors": errors}
 
     # ------------------------------------------------------------------
     # 内部
     # ------------------------------------------------------------------
+    def _prune_empty_dirs(self) -> List[str]:
+        root = self._root()
+        removed: List[str] = []
+        for current, dirs, _names in os.walk(str(root), topdown=False):
+            base = Path(current)
+            for name in dirs:
+                folder = base / name
+                if folder.is_symlink() or name.startswith("."):
+                    continue
+                try:
+                    folder.rmdir()
+                    removed.append(self._rel(folder))
+                except OSError:
+                    pass
+        return removed
+
     def _trash(self, source: Path) -> Path:
         if not source.exists():
             raise FileManagerError("要删除的文件不存在")
