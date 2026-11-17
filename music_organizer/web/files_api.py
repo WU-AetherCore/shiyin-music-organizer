@@ -118,6 +118,7 @@ def upload():
             files,
             auto_classify=request.form.get("auto_classify", "1") not in ("0", "false", "off"),
             classify_mode=request.form.get("classify_mode", "artist_album"),
+            only_existing=request.form.get("only_existing", "1") not in ("0", "false", "off"),
         )
         return jsonify({"ok": True, **result})
     except Exception as exc:

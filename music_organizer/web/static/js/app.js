@@ -1043,6 +1043,7 @@ function fileUploadPrompt() {
       <input type="file" id="fileUploadInput" multiple accept="audio/*,.flac,.mp3,.m4a,.ogg,.opus,.wav,.aiff,.ape,.wv,.lrc,.jpg,.jpeg,.png,.webp,.txt,.nfo">
       <p class="file-modal-note">支持音频、封面、.lrc 和文本；上传后会自动进入曲库索引。大文件请保持页面打开。</p>
       <label class="checkline" style="margin-top:12px"><input type="checkbox" id="uploadAutoClassify" checked> 上传音频后自动分类</label>
+      <label class="checkline"><input type="checkbox" id="uploadOnlyExisting" checked> 只放入已有文件夹，缺失时进入「其他」</label>
       <label class="field" id="uploadClassifyWrap" style="margin-top:8px"><span>分类方式</span>
         <select class="select" id="uploadClassifyMode">
           <option value="artist_album">歌手 / 专辑</option>
@@ -1065,6 +1066,7 @@ function fileUploadSubmit() {
   const form = new FormData();
   form.append('path', state.files.path || '');
   form.append('auto_classify', $('#uploadAutoClassify')?.checked ? '1' : '0');
+  form.append('only_existing', $('#uploadOnlyExisting')?.checked ? '1' : '0');
   form.append('classify_mode', $('#uploadClassifyMode')?.value || 'artist_album');
   Array.from(input.files).forEach((file) => form.append('files', file));
   const bar = $('#fileUploadProgress');
@@ -1220,6 +1222,7 @@ function fileOrganizeModal() {
     <div class="modal-body">
       <div class="form-row"><div class="form-label">目录结构</div>
         <select class="select" id="organizeMode">
+          <option value="keep" selected>保持当前目录结构（只改文件名）</option>
           <option value="artist_album">歌手 / 专辑</option>
           <option value="artist">歌手</option>
           <option value="album">专辑</option>
@@ -1270,7 +1273,7 @@ function fileRenameBatchModal() {
 }
 
 async function fileOrganizePreview() {
-  const mode = $('#organizeMode')?.value || 'artist_album';
+  const mode = $('#organizeMode')?.value || 'keep';
   const fileMode = $('#organizeFileMode')?.value || 'keep';
   const fileTemplates = {
     keep: '',

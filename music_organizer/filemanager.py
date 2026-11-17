@@ -10,6 +10,7 @@ import base64
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import threading
@@ -22,7 +23,7 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 from . import audio, db, scanner
 from .config import Config
 from .paths import AppPaths, get_paths
-from .textutil import parse_filename, safe_filename
+from .textutil import clean_spaces, parse_filename, safe_filename
 
 AUDIO_EXTS = set(audio.READABLE_EXTS)
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".avif"}
@@ -464,6 +465,7 @@ class FileManager:
         files: Iterable[Any],
         auto_classify: bool = True,
         classify_mode: str = "artist_album",
+        only_existing: bool = True,
     ) -> Dict[str, Any]:
         with self._lock:
             self._ensure_original()
@@ -500,7 +502,7 @@ class FileManager:
                 classified = False
                 if auto_classify and ext in AUDIO_EXTS and classify_mode != "keep":
                     try:
-                        classified_target = self._auto_classify_target(target, classify_mode)
+                        classified_target = self._auto_classify_target(target, classify_mode, only_existing=only_existing)
                         if classified_target != target:
                             classified_target.parent.mkdir(parents=True, exist_ok=True)
                             final_target = self._unique_target(classified_target)
@@ -522,8 +524,36 @@ class FileManager:
                 self._record("导入文件", f"上传 {len(saved)} 个文件" + ("（自动分类）" if auto_classify else ""), inverses)
             return {"saved": saved, "errors": errors, "warnings": warnings}
 
-    def _auto_classify_target(self, path: Path, mode: str) -> Path:
-        """按标签/文件名给刚上传的音频选一个目录。"""
+    @staticmethod
+    def _norm_folder_name(value: str) -> str:
+        text = clean_spaces(str(value or "")).casefold()
+        text = re.sub(r"^\s*\d{1,3}\s*[-._、]\s*", "", text)
+        return re.sub(r"\s+", "", text)
+
+    def _existing_artist_folder(self, artist: str) -> Optional[Path]:
+        wanted = self._norm_folder_name(artist)
+        if not wanted or wanted in ("未知歌手", "其他"):
+            return None
+        root = self._root()
+        for folder in root.iterdir():
+            if not folder.is_dir() or folder.name.startswith(".") or folder.name in ("其他", "Exports", "导出"):
+                continue
+            name = self._norm_folder_name(folder.name)
+            if name == wanted or wanted in name or name in wanted:
+                return folder
+        return None
+
+    def _other_folder(self) -> Path:
+        other = self._root() / "其他"
+        other.mkdir(parents=True, exist_ok=True)
+        return other
+
+    def _auto_classify_target(self, path: Path, mode: str, only_existing: bool = True) -> Path:
+        """按标签/文件名给刚上传的音频选一个目录。
+
+        only_existing=True 时不新建歌手/专辑目录：优先放进已有的歌手目录，
+        找不到对应目录就放进 ``其他``。
+        """
         meta: Dict[str, Any] = {}
         try:
             meta = audio.read_meta(path)
@@ -538,20 +568,41 @@ class FileManager:
         if not meta.get("album"):
             meta["album"] = "未知专辑"
         values = self._values(meta, path)
-        templates = {
-            "artist_album": "{artist}/{album}",
-            "artist": "{artist}",
-            "album": "{album}",
-            "genre": "{genre}",
-            "year": "{year}",
-        }
-        template = templates.get(mode)
-        if not template:
-            return path
-        folder = self._render(template, values, "未分类")
-        parts = [self._safe_name(part, "未分类") for part in folder.replace("\\", "/").split("/") if part.strip()]
-        target_dir = self._root().joinpath(*parts) if parts else self._root()
-        return target_dir / path.name
+        if not only_existing:
+            templates = {
+                "artist_album": "{artist}/{album}",
+                "artist": "{artist}",
+                "album": "{album}",
+                "genre": "{genre}",
+                "year": "{year}",
+            }
+            template = templates.get(mode)
+            if not template:
+                return path
+            folder = self._render(template, values, "未分类")
+            parts = [self._safe_name(part, "未分类") for part in folder.replace("\\", "/").split("/") if part.strip()]
+            target_dir = self._root().joinpath(*parts) if parts else self._root()
+            return target_dir / path.name
+
+        artist_dir = self._existing_artist_folder(values["artist"])
+        if mode in ("artist", "artist_album") and artist_dir is not None:
+            if mode == "artist_album":
+                album_key = self._norm_folder_name(values["album"])
+                for child in artist_dir.iterdir():
+                    if child.is_dir() and self._norm_folder_name(child.name) == album_key:
+                        return child / path.name
+            return artist_dir / path.name
+        if mode in ("album", "genre", "year"):
+            key = self._norm_folder_name(values.get(mode) or "")
+            if key:
+                for folder in self._root().iterdir():
+                    if folder.is_dir() and not folder.name.startswith(".") and folder.name not in ("其他", "导出", "Exports"):
+                        if self._norm_folder_name(folder.name) == key:
+                            return folder / path.name
+                        for child in folder.iterdir():
+                            if child.is_dir() and self._norm_folder_name(child.name) == key:
+                                return child / path.name
+        return self._other_folder() / path.name
 
     def export_files(
         self,
@@ -804,26 +855,37 @@ class FileManager:
                 "track_title": "{track:02d} - {title}",
                 "title": "{title}",
             }
-            folder = dir_template.strip() if mode == "custom" else folder_presets.get(mode, "{artist}/{album}")
-            if not folder:
-                raise FileManagerError("请选择目录结构")
             filename = file_template.strip()
             if filename not in file_presets.values() and not filename:
                 filename = ""
 
-            def build(source: Path, values: Dict[str, Any]) -> Path:
-                folder_text = self._render(folder, values, "未分类")
-                name = self._render(filename, values, values["title"]) if filename else source.name
-                ext = source.suffix
-                if filename and not name.lower().endswith(ext):
-                    name += ext
-                clean_parts = []
-                for part in folder_text.replace("\\", "/").split("/"):
-                    part = self._safe_name(part, "未分类")
-                    if part:
-                        clean_parts.append(part)
-                clean_name = self._safe_name(name, values["title"] + ext)
-                return self._root().joinpath(*clean_parts, clean_name)
+            if mode == "keep":
+                def build(source: Path, values: Dict[str, Any]) -> Path:
+                    if not filename:
+                        return source
+                    name = self._render(filename, values, values["title"])
+                    ext = source.suffix
+                    if not name.lower().endswith(ext):
+                        name += ext
+                    return source.with_name(self._safe_name(name, values["title"] + ext))
+            else:
+                folder = dir_template.strip() if mode == "custom" else folder_presets.get(mode, "{artist}/{album}")
+                if not folder:
+                    raise FileManagerError("请选择目录结构")
+
+                def build(source: Path, values: Dict[str, Any]) -> Path:
+                    folder_text = self._render(folder, values, "未分类")
+                    name = self._render(filename, values, values["title"]) if filename else source.name
+                    ext = source.suffix
+                    if filename and not name.lower().endswith(ext):
+                        name += ext
+                    clean_parts = []
+                    for part in folder_text.replace("\\", "/").split("/"):
+                        part = self._safe_name(part, "未分类")
+                        if part:
+                            clean_parts.append(part)
+                    clean_name = self._safe_name(name, values["title"] + ext)
+                    return self._root().joinpath(*clean_parts, clean_name)
 
             result = self._plan_audio(
                 build,

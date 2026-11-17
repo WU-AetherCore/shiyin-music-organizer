@@ -87,9 +87,18 @@ def test_upload_auto_classifies_by_tags(env):
     result = fm.save_uploads("", [storage], auto_classify=True, classify_mode="artist_album")
     assert result["saved"], result
     path = result["saved"][0]["path"]
-    assert path.startswith("周杰伦/"), path
-    assert path.endswith("导入测试.flac"), path
+    assert path == "其他/导入测试.flac", path
     assert (env["music"] / path).is_file()
+
+
+def test_upload_reuses_existing_artist_folder(env):
+    fm = _manager(env)
+    (env["music"] / "周杰伦").mkdir()
+    source = next(env["music"].glob("*.flac"))
+    storage = FileStorage(stream=io.BytesIO(source.read_bytes()), filename="导入测试2.flac")
+    result = fm.save_uploads("", [storage], auto_classify=True, classify_mode="artist_album")
+    path = result["saved"][0]["path"]
+    assert path == "周杰伦/导入测试2.flac", path
 
 
 def test_organize_keep_artists(env):
@@ -98,6 +107,13 @@ def test_organize_keep_artists(env):
     kept = [item for item in preview["items"] if item.get("artist") == "周杰伦"]
     assert kept
     assert all(item["status"] == "skipped" for item in kept)
+
+
+def test_organize_keep_structure_is_default(env):
+    fm = _manager(env)
+    preview = fm.preview_organize("keep")
+    assert preview["planned"] == 0
+    assert preview["skipped"] >= 1
 
 
 def test_export_original_copy(env):
