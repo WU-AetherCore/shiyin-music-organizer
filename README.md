@@ -479,7 +479,8 @@ morg lrc --clean --yes   # 清理冗余/失联 .lrc
 
 ## Navidrome 联动
 
-Navidrome 不会自动感知外部写入的标签，需要一次重新扫描。
+Navidrome 不会自动感知外部写入的标签，需要一次重新扫描。修复完成后插件会调用
+`startScan.view?fullScan=true` 触发全量扫描，而不是只扫增量。
 
 在「设置 → Navidrome 联动」填写：
 
@@ -512,7 +513,13 @@ Jellyfin 通过 Web API Key 鉴权，不依赖用户名密码：
    - API Key：粘贴刚创建的密钥
 3. 点「测试连接」，成功后保存；
 4. 可选「修复后自动刷新」；
-5. 修复完成后点「立即刷新」，Jellyfin 会重新扫描媒体库。
+5. 单曲修复、播放时修复、批量修复、手动改标签/歌词/封面后都会自动同步；也可以点「立即刷新」手动触发。
+
+Jellyfin 的 `Library/Refresh` 只触发扫描，不会主动替换已有封面缓存。插件现在会：
+- 按文件路径找到对应曲目；
+- 对曲目执行 `FullRefresh + ReplaceAllImages`；
+- 把修复后的内嵌封面以 Base64 重新上传到曲目和专辑（Jellyfin 图片上传接口要求 Base64，直接传原始 JPEG 会报 500）；
+- 最后再刷新一次媒体库。
 
 > Jellyfin 的 `Library/Refresh` 只触发扫描，不会修改文件；如果 Jellyfin 在 Docker 中，
 > 确保它的音乐卷映射到插件写入的同一个宿主机目录。

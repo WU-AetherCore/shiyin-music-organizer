@@ -437,6 +437,14 @@ def get_lyrics(track_id: int):
     )
 
 
+def _sync_media_track(track: Dict[str, Any]) -> List[str]:
+    """标签/歌词/封面被手动修改后，同步通知已启用的媒体服务器。"""
+    try:
+        return jobs.notify_media_servers(_cfg(), _paths(), changed_paths=[str(track.get("path") or "")])
+    except Exception as exc:
+        return [f"媒体服务器同步失败：{str(exc)[:160]}"]
+
+
 @bp.put("/tracks/<int:track_id>/lyrics")
 def put_lyrics(track_id: int):
     track = _track_or_404(track_id)
@@ -452,7 +460,7 @@ def put_lyrics(track_id: int):
     if "offset_ms" in data:
         db.set_offset(track_id, int(data["offset_ms"]), _paths())
     updated = db.get_track(track_id, _paths()) or track
-    return jsonify({"ok": True, "result": result, "track": track_json(updated)})
+    return jsonify({"ok": True, "result": result, "track": track_json(updated), "sync": _sync_media_track(updated)})
 
 
 @bp.post("/tracks/<int:track_id>/tags")
@@ -466,7 +474,7 @@ def put_tags(track_id: int):
     except (ValueError, FileNotFoundError) as exc:
         raise ApiError(str(exc))
     updated = db.get_track(track_id, _paths()) or track
-    return jsonify({"ok": True, "result": result, "track": track_json(updated)})
+    return jsonify({"ok": True, "result": result, "track": track_json(updated), "sync": _sync_media_track(updated)})
 
 
 @bp.post("/tracks/<int:track_id>/undo")
@@ -478,7 +486,7 @@ def undo_track(track_id: int):
     except (FileNotFoundError, audio.AudioError) as exc:
         raise ApiError(str(exc), 404)
     updated = db.get_track(track_id, _paths()) or track
-    return jsonify({"ok": True, "result": result, "track": track_json(updated)})
+    return jsonify({"ok": True, "result": result, "track": track_json(updated), "sync": _sync_media_track(updated)})
 
 
 # ---------------------------------------------------------------------------
@@ -590,7 +598,7 @@ def apply_candidate(track_id: int):
     except Exception as exc:
         raise ApiError(f"应用失败：{exc}", 422)
     updated = db.get_track(track_id, _paths()) or track
-    return jsonify({"ok": True, "result": result, "track": track_json(updated)})
+    return jsonify({"ok": True, "result": result, "track": track_json(updated), "sync": _sync_media_track(updated)})
 
 
 @bp.post("/tracks/<int:track_id>/cover-upload")
@@ -608,7 +616,7 @@ def cover_upload(track_id: int):
     except Exception as exc:
         raise ApiError(f"封面写入失败：{exc}", 422)
     updated = db.get_track(track_id, _paths()) or track
-    return jsonify({"ok": True, "result": result, "track": track_json(updated)})
+    return jsonify({"ok": True, "result": result, "track": track_json(updated), "sync": _sync_media_track(updated)})
 
 
 # ---------------------------------------------------------------------------

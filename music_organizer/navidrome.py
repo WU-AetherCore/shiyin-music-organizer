@@ -66,13 +66,15 @@ def check(config: Config, paths: Optional[AppPaths] = None) -> Tuple[bool, Dict[
     return True, info
 
 
-def trigger_rescan(config: Config, paths: Optional[AppPaths] = None) -> Tuple[bool, str]:
+def trigger_rescan(config: Config, paths: Optional[AppPaths] = None, full: bool = True) -> Tuple[bool, str]:
     if not config.get("navidrome.enabled"):
         return False, "未启用 Navidrome 联动"
     base = _base_url(config)
     if not base:
         return False, "未配置 Navidrome 地址"
     params = _auth_params(config)
+    if full:
+        params["fullScan"] = "true"
     try:
         payload = _client(config).get_json(f"{base}/startScan.view", params=params)
     except HttpError as exc:

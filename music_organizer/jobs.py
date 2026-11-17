@@ -318,6 +318,7 @@ def start_batch(
         job.total = total
         job.message = "准备修复…"
         job.log(f"待处理 {total} 首，目标：{'、'.join(_target_label(t) for t in target_list)}")
+        changed_paths: List[str] = []
         for index, track in enumerate(tracks, start=1):
             if job.cancel_event.is_set():
                 break
@@ -341,6 +342,7 @@ def start_batch(
             status = data.get("status")
             if status in ("fixed", "partial"):
                 job.succeeded += 1
+                changed_paths.append(str(track.get("path") or ""))
             elif status in ("skipped", "dry_run"):
                 job.skipped += 1
             elif status in ("not_found",):
@@ -366,7 +368,7 @@ def start_batch(
             else f"已取消（完成 {job.done}/{job.total}）"
         )
         config.set("automation.last_fix_at", _now()).save()
-        _notify_media_servers(config, paths, manager, job)
+        _notify_media_servers(config, paths, manager, job, changed_paths=changed_paths)
         return {
             "total": job.total,
             "succeeded": job.succeeded,
@@ -424,6 +426,8 @@ def start_single(
             }
         )
         job.result = data
+        if outcome.status in ("fixed", "partial"):
+            _notify_media_servers(config, paths, manager, job, changed_paths=[str(track.get("path") or "")])
         return data
 
     return manager.submit(
@@ -465,6 +469,14 @@ def start_lrc_embed(
         job.done = min(job.total, job.succeeded + job.failed)
         job.message = f"嵌入完成：成功 {job.succeeded}，失败 {job.failed}"
         job.result = result
+        if job.succeeded:
+            _notify_media_servers(
+                config,
+                paths,
+                manager,
+                job,
+                changed_paths=[str(entry.audio_path) for entry in entries if entry.audio_path],
+            )
         return result
 
     return manager.submit("lrc_embed", f"嵌入外置歌词 · {len(entries)} 首", runner, source="web")
@@ -514,20 +526,44 @@ def _status_label(status: str) -> str:
     }.get(status, status)
 
 
-def _notify_media_servers(config: Config, paths: AppPaths, manager: JobManager, job: Job) -> None:
+def notify_media_servers(
+    config: Config,
+    paths: AppPaths,
+    changed_paths: Sequence[str] = (),
+    log: Optional[Callable[[str], None]] = None,
+) -> List[str]:
+    """通知 Navidrome/Jellyfin；返回日志行，供任务和同步接口复用。"""
+    messages: List[str] = []
+    emit = log or messages.append
     if config.get("navidrome.enabled") and config.get("navidrome.rescan_after_fix"):
         try:
             from .navidrome import trigger_rescan
 
-            ok, message = trigger_rescan(config, paths)
-            job.log(("Navidrome 重新扫描：成功" if ok else "Navidrome 重新扫描失败：") + message)
+            ok, message = trigger_rescan(config, paths, full=True)
+            emit(("Navidrome 重新扫描：成功" if ok else "Navidrome 重新扫描失败：") + message)
         except Exception as exc:
-            job.log(f"Navidrome 联动失败：{exc}")
+            emit(f"Navidrome 联动失败：{exc}")
     if config.get("jellyfin.enabled") and config.get("jellyfin.refresh_after_fix"):
         try:
-            from .jellyfin import refresh
+            if changed_paths:
+                from .jellyfin import refresh_tracks
 
-            ok, message = refresh(config, paths)
-            job.log(("Jellyfin 刷新：成功" if ok else "Jellyfin 刷新失败：") + message)
+                ok, message = refresh_tracks(config, paths, changed_paths)
+            else:
+                from .jellyfin import refresh
+
+                ok, message = refresh(config, paths)
+            emit(("Jellyfin 刷新：成功" if ok else "Jellyfin 刷新失败：") + message)
         except Exception as exc:
-            job.log(f"Jellyfin 联动失败：{exc}")
+            emit(f"Jellyfin 联动失败：{exc}")
+    return messages
+
+
+def _notify_media_servers(
+    config: Config,
+    paths: AppPaths,
+    manager: JobManager,
+    job: Job,
+    changed_paths: Sequence[str] = (),
+) -> None:
+    notify_media_servers(config, paths, changed_paths=changed_paths, log=job.log)

@@ -1,5 +1,18 @@
 # 更新日志
 
+## v1.3.6 · 2026-11-17
+
+### 修复 Jellyfin / Navidrome 联动不更新封面
+
+- **单曲修复、播放时修复、批量修复、手动改歌词/标签/封面**都会触发媒体服务器同步；
+- Jellyfin 不再只调用 `Library/Refresh`：
+  - 按曲目路径找到 Jellyfin 条目；
+  - `FullRefresh + ReplaceAllImages` 强制刷新；
+  - 把修复后的内嵌封面以 Base64 重新上传到曲目和专辑（Jellyfin 图片上传要求 Base64，原来直接 POST 原始 JPEG 会 500）；
+  - 最后再触发一次媒体库刷新。
+- Navidrome 改为 **fullScan=true** 全量扫描，避免只扫增量导致封面缓存不变；
+- 当前 `听说你 - 于冬然` 的 Jellyfin 曲目/专辑封面已手动修正为本地内嵌封面（800×800）。
+
 ## v1.3.5 · 2026-11-17
 
 ### 播放音质可手动选择
