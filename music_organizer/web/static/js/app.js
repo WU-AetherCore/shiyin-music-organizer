@@ -823,7 +823,7 @@ function fileEntryRow(entry) {
       <span class="file-ic ${entry.kind}">${FILE_ICONS[entry.kind] || FILE_ICONS.other}</span>
       <div style="min-width:0">
         <button class="file-name" data-action="${entry.is_dir ? 'file-open' : (isAudio && entry.track_id ? 'file-track' : isText ? 'file-edit-text' : 'file-download')}" data-path="${esc(entry.path)}" data-id="${entry.track_id || 0}" title="${esc(entry.name)}">${esc(entry.name)}</button>
-        <div class="file-sub">${entry.is_dir ? '文件夹' : (entry.ext || '文件')}${isAudio && entry.track_id ? ' · 已入库' : ''}</div>
+        <div class="file-sub">${entry.is_dir ? '文件夹' : (entry.ext || '文件')}${isAudio && entry.track_id ? ' · 已入库' : ''}${entry.writable === false ? ' · 只读' : ''}</div>
       </div>
     </div>
     <div class="file-col file-col-kind">${fileLabel(entry.kind)}</div>
@@ -854,6 +854,7 @@ function renderFiles() {
     <div class="files-page">
       <div class="files-actions">
         <button class="btn btn-primary btn-sm" data-action="file-upload">${ICONS.upload}<span>导入文件</span></button>
+        <button class="btn btn-ghost btn-sm" data-action="file-export">导出/转换</button>
         <button class="btn btn-ghost btn-sm" data-action="file-mkdir">新建文件夹</button>
         <button class="btn btn-ghost btn-sm" data-action="file-organize">一键整理</button>
         <button class="btn btn-ghost btn-sm" data-action="file-rename-batch">批量命名</button>
@@ -897,7 +898,7 @@ function renderFiles() {
 
       <div class="file-footer">
         <span>${f.dirs || 0} 个文件夹 · ${f.files || 0} 个文件</span>
-        <span>删除进入应用回收站，可撤销</span>
+        ${f.readonly ? `<span style="color:var(--warn)">⚠ ${f.readonly} 项只读；修复会失败，请先修正文件所有者/权限</span>` : '<span>删除进入应用回收站，可撤销</span>'}
         <span class="spacer"></span>
         <span>${f.original?.exists ? `原始快照：${f.original.file_count} 个文件` : '原始快照将在第一次修改前建立'}</span>
         <span>历史：${f.historyCount || 0} 次</span>
@@ -1041,6 +1042,17 @@ function fileUploadPrompt() {
     <div class="modal-body">
       <input type="file" id="fileUploadInput" multiple accept="audio/*,.flac,.mp3,.m4a,.ogg,.opus,.wav,.aiff,.ape,.wv,.lrc,.jpg,.jpeg,.png,.webp,.txt,.nfo">
       <p class="file-modal-note">支持音频、封面、.lrc 和文本；上传后会自动进入曲库索引。大文件请保持页面打开。</p>
+      <label class="checkline" style="margin-top:12px"><input type="checkbox" id="uploadAutoClassify" checked> 上传音频后自动分类</label>
+      <label class="field" id="uploadClassifyWrap" style="margin-top:8px"><span>分类方式</span>
+        <select class="select" id="uploadClassifyMode">
+          <option value="artist_album">歌手 / 专辑</option>
+          <option value="artist">按歌手</option>
+          <option value="album">按专辑</option>
+          <option value="genre">按流派</option>
+          <option value="year">按年份</option>
+          <option value="keep">保持当前文件夹</option>
+        </select>
+      </label>
       <div class="file-progress" id="fileUploadProgress" style="display:none"><span></span></div>
       <div id="fileUploadStatus" class="file-modal-note"></div>
     </div>
@@ -1052,6 +1064,8 @@ function fileUploadSubmit() {
   if (!input || !input.files || !input.files.length) { toast('请选择文件', 'err'); return; }
   const form = new FormData();
   form.append('path', state.files.path || '');
+  form.append('auto_classify', $('#uploadAutoClassify')?.checked ? '1' : '0');
+  form.append('classify_mode', $('#uploadClassifyMode')?.value || 'artist_album');
   Array.from(input.files).forEach((file) => form.append('files', file));
   const bar = $('#fileUploadProgress');
   const status = $('#fileUploadStatus');
@@ -1070,8 +1084,9 @@ function fileUploadSubmit() {
     if (xhr.status >= 200 && xhr.status < 300 && data.ok !== false) {
       const saved = (data.saved || []).length;
       const errors = data.errors || [];
+      const warnings = data.warnings || [];
       closeModal();
-      toast(`已导入 ${saved} 个文件${errors.length ? `，${errors.length} 个失败` : ''}`, errors.length ? 'err' : 'ok');
+      toast(`已导入 ${saved} 个文件${errors.length ? `，${errors.length} 个失败` : ''}${warnings.length ? `，${warnings.length} 个未分类` : ''}`, (errors.length || warnings.length) ? 'err' : 'ok');
       await loadFiles(); loadOverview().catch(() => {});
     } else {
       if (status) status.textContent = data.error || '上传失败';
@@ -1080,6 +1095,52 @@ function fileUploadSubmit() {
   };
   xhr.onerror = () => { if (status) status.textContent = '网络错误'; toast('上传失败', 'err'); };
   xhr.send(form);
+}
+
+function fileExportModal() {
+  const paths = fileSelectedPaths();
+  if (!paths.length) { toast('请先选择要导出的音频', 'err'); return; }
+  openModal(`
+    <div class="modal-head"><div><div class="modal-title">导出 / 转换</div><div class="modal-sub">${paths.length} 个文件 · 源文件不会被修改</div></div><button class="icon-btn modal-close" data-action="modal-cancel">${ICONS.close}</button></div>
+    <div class="modal-body">
+      <label class="field"><span>输出格式</span>
+        <select class="select" id="exportFormat">
+          <option value="original">保持原格式（复制）</option>
+          <option value="flac">FLAC（无损）</option>
+          <option value="mp3">MP3</option>
+          <option value="m4a">M4A / AAC</option>
+          <option value="ogg">OGG Vorbis</option>
+          <option value="opus">Opus</option>
+          <option value="wav">WAV（体积较大）</option>
+        </select>
+      </label>
+      <label class="field" id="exportBitrateWrap" style="display:none"><span>码率</span>
+        <select class="select" id="exportBitrate">
+          <option value="128">128 kbps</option>
+          <option value="192">192 kbps</option>
+          <option value="256">256 kbps</option>
+          <option value="320" selected>320 kbps</option>
+        </select>
+      </label>
+      <label class="field"><span>输出文件夹</span><input class="input" id="exportDest" value="导出"></label>
+      <p class="file-modal-note">默认「保持原格式」只复制，不转码。FLAC/WAV 为无损；MP3/M4A/OGG/Opus 会重新编码。转换在后台完成，大文件请保持页面打开。</p>
+    </div>
+    <div class="modal-foot"><div class="spacer"></div><button class="btn btn-ghost" data-action="modal-cancel">取消</button><button class="btn btn-primary" data-action="file-export-submit">开始导出</button></div>`);
+}
+
+async function fileExportSubmit() {
+  const format = $('#exportFormat')?.value || 'original';
+  const bitrate = $('#exportBitrate')?.value || '320';
+  const dest = $('#exportDest')?.value || '导出';
+  const paths = fileSelectedPaths();
+  if (!paths.length) { toast('请先选择要导出的音频', 'err'); return; }
+  try {
+    toast('正在导出，请稍候…', 'ok', 3000);
+    const data = await api('/api/files/export', { method: 'POST', body: { paths, format, bitrate, dest } });
+    closeModal(); state.files.selected.clear();
+    toast(`已导出 ${data.saved?.length || 0} 个文件${data.errors?.length ? `，${data.errors.length} 个失败` : ''}`, data.errors?.length ? 'err' : 'ok');
+    await loadFiles(); loadOverview().catch(() => {});
+  } catch (err) { toast(err.message, 'err'); }
 }
 
 async function fileEditText(path) {
@@ -1179,6 +1240,7 @@ function fileOrganizeModal() {
         </select>
       </div>
       <div class="form-row" id="organizeFileWrap" style="display:none"><div class="form-label">文件名模板</div><input class="input" id="organizeFileTemplate" value="{artist} - {title}"></div>
+      <div class="form-row"><div class="form-label">保持不动的歌手 <span class="hint">可选，逗号分隔</span></div><input class="input" id="organizeKeepArtists" placeholder="例如：周杰伦, 陈奕迅"></div>
       <p class="file-modal-note">可用变量：{artist} {album} {title} {track} {year} {genre}。预览确认后才会移动；同名文件会自动加序号。</p>
       <div id="organizePreview"></div>
     </div>
@@ -1221,7 +1283,7 @@ async function fileOrganizePreview() {
   try {
     const data = await api('/api/files/organize/preview', {
       method: 'POST',
-      body: { mode, dir_template: $('#organizeDirTemplate')?.value || '', file_template: fileTemplate },
+      body: { mode, dir_template: $('#organizeDirTemplate')?.value || '', file_template: fileTemplate, keep_artists: $('#organizeKeepArtists')?.value || '' },
     });
     state.files.plan = data.plan_id;
     $('#organizePreview').innerHTML = fileOrganizePreviewHtml(data, 'organize');
@@ -3094,6 +3156,12 @@ async function handleAction(action, el, event) {
     case 'file-upload-submit':
       fileUploadSubmit();
       break;
+    case 'file-export':
+      fileExportModal();
+      break;
+    case 'file-export-submit':
+      await fileExportSubmit();
+      break;
     case 'file-mkdir':
       await fileMkdir();
       break;
@@ -3316,6 +3384,16 @@ function bindEvents() {
     if (target.id === 'renameMode') {
       const wrap = $('#renameTemplateWrap');
       if (wrap) wrap.style.display = target.value === 'custom' ? '' : 'none';
+      return;
+    }
+    if (target.id === 'uploadAutoClassify') {
+      const wrap = $('#uploadClassifyWrap');
+      if (wrap) wrap.style.display = target.checked ? '' : 'none';
+      return;
+    }
+    if (target.id === 'exportFormat') {
+      const wrap = $('#exportBitrateWrap');
+      if (wrap) wrap.style.display = ['mp3', 'm4a', 'ogg', 'opus'].includes(target.value) ? '' : 'none';
       return;
     }
     if (target.matches('[data-select-id]')) {

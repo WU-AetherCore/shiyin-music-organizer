@@ -1,6 +1,8 @@
 from pathlib import Path
+import io
 
 import pytest
+from werkzeug.datastructures import FileStorage
 
 from music_organizer.filemanager import FileManager, FileManagerError
 from music_organizer.textutil import parse_lrc
@@ -76,6 +78,36 @@ def test_text_edit_and_undo(env):
     assert "第二行" in lrc.read_text(encoding="utf-8")
     fm.undo_last()
     assert "第一行" in lrc.read_text(encoding="utf-8")
+
+
+def test_upload_auto_classifies_by_tags(env):
+    fm = _manager(env)
+    source = next(env["music"].glob("*.flac"))
+    storage = FileStorage(stream=io.BytesIO(source.read_bytes()), filename="导入测试.flac")
+    result = fm.save_uploads("", [storage], auto_classify=True, classify_mode="artist_album")
+    assert result["saved"], result
+    path = result["saved"][0]["path"]
+    assert path.startswith("周杰伦/"), path
+    assert path.endswith("导入测试.flac"), path
+    assert (env["music"] / path).is_file()
+
+
+def test_organize_keep_artists(env):
+    fm = _manager(env)
+    preview = fm.preview_organize("artist_album", keep_artists="周杰伦")
+    kept = [item for item in preview["items"] if item.get("artist") == "周杰伦"]
+    assert kept
+    assert all(item["status"] == "skipped" for item in kept)
+
+
+def test_export_original_copy(env):
+    fm = _manager(env)
+    source = next(env["music"].glob("*.flac"))
+    result = fm.export_files([source.name], fmt="original", dest_rel="导出")
+    assert result["saved"], result
+    assert (env["music"] / "导出").is_dir()
+    assert (env["music"] / result["saved"][0]["path"]).is_file()
+
 
 def test_files_api_crud_and_undo(env):
     client = env["client"]

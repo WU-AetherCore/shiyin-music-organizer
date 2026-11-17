@@ -11,6 +11,7 @@ import hashlib
 import json
 import os
 import shutil
+import subprocess
 import threading
 import time
 import uuid
@@ -21,7 +22,7 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 from . import audio, db, scanner
 from .config import Config
 from .paths import AppPaths, get_paths
-from .textutil import safe_filename
+from .textutil import parse_filename, safe_filename
 
 AUDIO_EXTS = set(audio.READABLE_EXTS)
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".avif"}
@@ -297,6 +298,7 @@ class FileManager:
                     "modified": datetime.fromtimestamp(stat.st_mtime).isoformat(timespec="seconds"),
                     "ext": ext,
                     "kind": kind,
+                    "writable": bool(os.access(item, os.W_OK)),
                     "track_id": int(track["id"]) if track else 0,
                 }
                 if query:
@@ -335,6 +337,7 @@ class FileManager:
                 "entries": entries,
                 "dirs": sum(1 for item in entries if item["is_dir"]),
                 "files": sum(1 for item in entries if not item["is_dir"]),
+                "readonly": sum(1 for item in entries if not item.get("writable")),
                 "disk": disk,
                 "writable": os.access(root, os.W_OK),
                 "original": self._original_info(),
@@ -455,12 +458,21 @@ class FileManager:
     # ------------------------------------------------------------------
     # 上传 / 文本
     # ------------------------------------------------------------------
-    def save_uploads(self, dir_rel: str, files: Iterable[Any]) -> Dict[str, Any]:
+    def save_uploads(
+        self,
+        dir_rel: str,
+        files: Iterable[Any],
+        auto_classify: bool = True,
+        classify_mode: str = "artist_album",
+    ) -> Dict[str, Any]:
         with self._lock:
             self._ensure_original()
             destination = self._resolve(dir_rel, must_exist=True, must_dir=True)
+            if not os.access(destination, os.W_OK):
+                raise FileManagerError("当前文件夹没有写入权限")
             saved = []
             errors = []
+            warnings = []
             inverses = []
             for storage in files:
                 original_name = getattr(storage, "filename", "") or "上传文件"
@@ -476,6 +488,7 @@ class FileManager:
                     if not temp.is_file() or temp.stat().st_size <= 0:
                         raise FileManagerError("空文件")
                     os.replace(temp, target)
+                    os.chmod(target, 0o644)
                 except Exception as exc:
                     try:
                         temp.unlink(missing_ok=True)
@@ -483,12 +496,143 @@ class FileManager:
                         pass
                     errors.append({"name": original_name, "error": str(exc)[:200]})
                     continue
-                inverses.append({"op": "trash", "path": self._rel(target)})
-                self._scan_audio_under(target)
-                saved.append({"name": target.name, "path": self._rel(target), "size": target.stat().st_size})
+                final_target = target
+                classified = False
+                if auto_classify and ext in AUDIO_EXTS and classify_mode != "keep":
+                    try:
+                        classified_target = self._auto_classify_target(target, classify_mode)
+                        if classified_target != target:
+                            classified_target.parent.mkdir(parents=True, exist_ok=True)
+                            final_target = self._unique_target(classified_target)
+                            shutil.move(str(target), str(final_target))
+                            classified = True
+                    except Exception as exc:
+                        warnings.append({"name": original_name, "error": f"自动分类失败，保留当前位置：{str(exc)[:160]}"})
+                inverses.append({"op": "trash", "path": self._rel(final_target)})
+                self._scan_audio_under(final_target)
+                saved.append(
+                    {
+                        "name": final_target.name,
+                        "path": self._rel(final_target),
+                        "size": final_target.stat().st_size,
+                        "classified": classified,
+                    }
+                )
             if inverses:
-                self._record("导入文件", f"上传 {len(saved)} 个文件", inverses)
-            return {"saved": saved, "errors": errors}
+                self._record("导入文件", f"上传 {len(saved)} 个文件" + ("（自动分类）" if auto_classify else ""), inverses)
+            return {"saved": saved, "errors": errors, "warnings": warnings}
+
+    def _auto_classify_target(self, path: Path, mode: str) -> Path:
+        """按标签/文件名给刚上传的音频选一个目录。"""
+        meta: Dict[str, Any] = {}
+        try:
+            meta = audio.read_meta(path)
+        except Exception:
+            pass
+        if not meta.get("artist") or not meta.get("title"):
+            guessed = parse_filename(path.name, path.parent.name)
+            if not meta.get("title"):
+                meta["title"] = guessed.get("title") or path.stem
+            if not meta.get("artist"):
+                meta["artist"] = guessed.get("artist") or "未知歌手"
+        if not meta.get("album"):
+            meta["album"] = "未知专辑"
+        values = self._values(meta, path)
+        templates = {
+            "artist_album": "{artist}/{album}",
+            "artist": "{artist}",
+            "album": "{album}",
+            "genre": "{genre}",
+            "year": "{year}",
+        }
+        template = templates.get(mode)
+        if not template:
+            return path
+        folder = self._render(template, values, "未分类")
+        parts = [self._safe_name(part, "未分类") for part in folder.replace("\\", "/").split("/") if part.strip()]
+        target_dir = self._root().joinpath(*parts) if parts else self._root()
+        return target_dir / path.name
+
+    def export_files(
+        self,
+        rels: Sequence[str],
+        fmt: str = "original",
+        bitrate: str = "320",
+        dest_rel: str = "导出",
+    ) -> Dict[str, Any]:
+        """复制或转换音频到导出目录；默认保持原格式，不修改源文件。"""
+        with self._lock:
+            self._ensure_original()
+            ffmpeg = shutil.which("ffmpeg")
+            specs = {
+                "original": (None, []),
+                "flac": (".flac", ["-c:a", "flac"]),
+                "mp3": (".mp3", ["-c:a", "libmp3lame"]),
+                "m4a": (".m4a", ["-c:a", "aac"]),
+                "ogg": (".ogg", ["-c:a", "libvorbis"]),
+                "opus": (".opus", ["-c:a", "libopus"]),
+                "wav": (".wav", ["-c:a", "pcm_s16le"]),
+            }
+            if fmt not in specs:
+                raise FileManagerError("不支持的导出格式")
+            if fmt not in ("original", "flac", "wav") and not ffmpeg:
+                raise FileManagerError("系统未安装 ffmpeg，无法转换格式")
+            destination = self._resolve(dest_rel or "导出")
+            destination.mkdir(parents=True, exist_ok=True)
+            if not os.access(destination, os.W_OK):
+                raise FileManagerError("导出目录没有写入权限")
+            rate = str(bitrate or "320").replace("k", "").strip() or "320"
+            saved = []
+            errors = []
+            inverses = []
+            for rel in list(rels)[:100]:
+                source = self._resolve(rel, must_exist=True)
+                if not source.is_file() or source.suffix.lower() not in AUDIO_EXTS:
+                    errors.append({"path": rel, "error": "不是支持的音频文件"})
+                    continue
+                ext, codec_args = specs[fmt]
+                out_ext = source.suffix.lower() if fmt == "original" else ext
+                target = self._unique_target(destination / f"{source.stem}{out_ext}")
+                try:
+                    if fmt == "original":
+                        shutil.copy2(str(source), str(target))
+                    else:
+                        temp = target.with_name(f".{target.stem}.tmp{out_ext}")
+                        cmd = [
+                            ffmpeg,
+                            "-hide_banner",
+                            "-loglevel",
+                            "error",
+                            "-y",
+                            "-i",
+                            str(source),
+                            "-map",
+                            "0:a",
+                            "-map_metadata",
+                            "0",
+                            "-vn",
+                            *codec_args,
+                        ]
+                        if fmt in ("mp3", "m4a", "ogg", "opus"):
+                            cmd += ["-b:a", f"{rate}k"]
+                        cmd.append(str(temp))
+                        proc = subprocess.run(cmd, capture_output=True, timeout=900)
+                        if proc.returncode != 0 or not temp.is_file() or temp.stat().st_size <= 0:
+                            try:
+                                temp.unlink(missing_ok=True)
+                            except OSError:
+                                pass
+                            raise FileManagerError((proc.stderr or b"").decode("utf-8", "ignore")[-240:] or "ffmpeg 转换失败")
+                        os.replace(temp, target)
+                    os.chmod(target, 0o644)
+                except Exception as exc:
+                    errors.append({"path": rel, "error": str(exc)[:240]})
+                    continue
+                inverses.append({"op": "trash", "path": self._rel(target)})
+                saved.append({"source": rel, "path": self._rel(target), "size": target.stat().st_size, "format": fmt})
+            if inverses:
+                self._record("导出音频", f"导出 {len(saved)} 个文件（{fmt}）", inverses)
+            return {"saved": saved, "errors": errors, "format": fmt}
 
     def read_text(self, rel: str) -> Dict[str, Any]:
         with self._lock:
@@ -554,8 +698,9 @@ class FileManager:
             result += ("/" if result else "") + part
         return result or fallback
 
-    def _plan_audio(self, target_builder) -> Dict[str, Any]:
+    def _plan_audio(self, target_builder, keep_artists: Optional[Sequence[str]] = None) -> Dict[str, Any]:
         root = self._root()
+        keep = {str(item or "").strip().casefold() for item in (keep_artists or []) if str(item or "").strip()}
         files = [Path(p) for p in scanner.collect_audio_files(self.config)]
         try:
             tracks = {str(item.get("path")): item for item in db.all_tracks(self.paths)}
@@ -576,6 +721,19 @@ class FileManager:
                 except Exception:
                     meta = {}
             values = self._values(meta or {}, source)
+            if keep and values["artist"].strip().casefold() in keep:
+                items.append(
+                    {
+                        "source": self._rel(source),
+                        "target": self._rel(source),
+                        "status": "skipped",
+                        "reason": f"保持歌手「{values['artist']}」当前目录",
+                        "title": values["title"],
+                        "artist": values["artist"],
+                        "album": values["album"],
+                    }
+                )
+                continue
             try:
                 target = target_builder(source, values)
             except FileManagerError as exc:
@@ -623,7 +781,13 @@ class FileManager:
             "errors": sum(1 for item in items if item["status"] == "error"),
         }
 
-    def preview_organize(self, mode: str, dir_template: str = "", file_template: str = "") -> Dict[str, Any]:
+    def preview_organize(
+        self,
+        mode: str,
+        dir_template: str = "",
+        file_template: str = "",
+        keep_artists: str = "",
+    ) -> Dict[str, Any]:
         with self._lock:
             self._ensure_original()
             folder_presets = {
@@ -661,7 +825,10 @@ class FileManager:
                 clean_name = self._safe_name(name, values["title"] + ext)
                 return self._root().joinpath(*clean_parts, clean_name)
 
-            result = self._plan_audio(build)
+            result = self._plan_audio(
+                build,
+                keep_artists=[item.strip() for item in str(keep_artists or "").replace("，", ",").replace("、", ",").replace(";", ",").replace("；", ",").split(",") if item.strip()],
+            )
             plan = {"type": "organize", "created": time.time(), "mode": mode, "data": result}
             plan_id = uuid.uuid4().hex
             self._save_json(self._plans_dir() / f"{plan_id}.json", plan)

@@ -11,7 +11,9 @@
       ".Trash",
       ".trash",
       "node_modules",
-      "__pycache__"
+      "__pycache__",
+      "导出",
+      "Exports"
     ],
     "extensions": [
       ".flac",

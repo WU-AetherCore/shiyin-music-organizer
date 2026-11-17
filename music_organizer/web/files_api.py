@@ -113,7 +113,12 @@ def upload():
         files = request.files.getlist("files") or request.files.getlist("file")
         if not files:
             raise FileManagerError("没有收到文件")
-        result = _manager().save_uploads(request.form.get("path", ""), files)
+        result = _manager().save_uploads(
+            request.form.get("path", ""),
+            files,
+            auto_classify=request.form.get("auto_classify", "1") not in ("0", "false", "off"),
+            classify_mode=request.form.get("classify_mode", "artist_album"),
+        )
         return jsonify({"ok": True, **result})
     except Exception as exc:
         return _failure(exc)
@@ -148,6 +153,28 @@ def write_text():
         return _failure(exc)
 
 
+@bp.post("/api/files/export")
+def export_audio():
+    try:
+        data = _json_body()
+        paths = data.get("paths")
+        if not isinstance(paths, list) or not paths:
+            raise FileManagerError("请选择要导出的音频")
+        return jsonify(
+            {
+                "ok": True,
+                **_manager().export_files(
+                    [str(item) for item in paths],
+                    str(data.get("format") or "original"),
+                    str(data.get("bitrate") or "320"),
+                    str(data.get("dest") or "导出"),
+                ),
+            }
+        )
+    except Exception as exc:
+        return _failure(exc)
+
+
 @bp.post("/api/files/organize/preview")
 def organize_preview():
     try:
@@ -159,6 +186,7 @@ def organize_preview():
                     str(data.get("mode") or "artist_album"),
                     str(data.get("dir_template") or ""),
                     str(data.get("file_template") or ""),
+                    str(data.get("keep_artists") or ""),
                 ),
             }
         )

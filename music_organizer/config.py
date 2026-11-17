@@ -48,6 +48,8 @@ DEFAULT_CONFIG: Dict[str, Any] = {
             ".trash",
             "node_modules",
             "__pycache__",
+            "导出",
+            "Exports",
         ],
         "extensions": AUDIO_EXTENSIONS,
         "follow_symlinks": False,
