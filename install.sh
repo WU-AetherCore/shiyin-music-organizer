@@ -164,6 +164,83 @@ EOF
   systemctl enable --now music-organizer.service
   ok "systemd 服务已启动：music-organizer.service"
 
+  # ---------------------------------------------------------------------
+  # 权限守护：1Panel/SMB 以 root 复制进来的新歌，自动归还给服务用户
+  # ---------------------------------------------------------------------
+  PERMS_SCRIPT="/usr/local/sbin/music-organizer-fix-perms"
+  cat > "$PERMS_SCRIPT" <<PYEOF
+#!/usr/bin/env python3
+"""把音乐目录里 root 创建的文件/目录归还给服务用户，保证后续可写。"""
+import json
+import os
+import pwd
+import sys
+from pathlib import Path
+
+USER = "$SERVICE_USER"
+CONFIG = Path("$HOME_DIR/.local/share/music-organizer/config.json")
+if not CONFIG.exists():
+    sys.exit(0)
+try:
+    data = json.loads(CONFIG.read_text(encoding="utf-8"))
+except Exception:
+    sys.exit(0)
+root = Path(str(data.get("music_dir") or ""))
+if not root.is_dir():
+    sys.exit(0)
+try:
+    uid = pwd.getpwnam(USER).pw_uid
+    gid = pwd.getpwnam(USER).pw_gid
+except KeyError:
+    sys.exit(0)
+for current, dirs, files in os.walk(root):
+    for name in dirs + files:
+        target = Path(current) / name
+        try:
+            if target.is_symlink():
+                continue
+            stat = target.stat()
+            if stat.st_uid != uid or stat.st_gid != gid:
+                os.chown(target, uid, gid)
+            if target.is_dir():
+                if stat.st_mode & 0o700 != 0o700:
+                    os.chmod(target, stat.st_mode | 0o700)
+            elif stat.st_mode & 0o600 != 0o600:
+                os.chmod(target, stat.st_mode | 0o600)
+        except OSError:
+            pass
+PYEOF
+  chmod 0755 "$PERMS_SCRIPT"
+
+  PERMS_SERVICE="/etc/systemd/system/music-organizer-perms.service"
+  PERMS_TIMER="/etc/systemd/system/music-organizer-perms.timer"
+  cat > "$PERMS_SERVICE" <<EOF
+[Unit]
+Description=Music Organizer permission guard
+
+[Service]
+Type=oneshot
+ExecStart=$PERMS_SCRIPT
+Nice=10
+IOSchedulingClass=idle
+EOF
+  cat > "$PERMS_TIMER" <<EOF
+[Unit]
+Description=Run Music Organizer permission guard every minute
+
+[Timer]
+OnBootSec=30s
+OnUnitActiveSec=60s
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+EOF
+  systemctl daemon-reload
+  systemctl enable --now music-organizer-perms.timer
+  "$PERMS_SCRIPT" || true
+  ok "权限守护已启用：每分钟把新导入的 root 文件/目录归还给 $SERVICE_USER"
+
   # 可选：无 Web 的纯调度器
   AUTO_UNIT="/etc/systemd/system/music-organizer-auto.service"
   cat > "$AUTO_UNIT" <<EOF

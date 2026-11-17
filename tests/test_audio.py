@@ -115,3 +115,18 @@ def test_unsupported_write(tmp_path):
     path.write_bytes(b"not really aac")
     with pytest.raises(audio.AudioError):
         audio.update_media(path, lyrics="x")
+
+
+def test_update_media_takes_over_unwritable_file(flac, monkeypatch):
+    import os
+
+    real_access = os.access
+
+    def fake_access(path, mode):
+        if Path(path) == flac and mode == os.W_OK:
+            return False
+        return real_access(path, mode)
+
+    monkeypatch.setattr(audio.os, "access", fake_access)
+    audio.update_media(flac, lyrics="接管权限后的歌词\n")
+    assert "接管权限后的歌词" in audio.read_lyrics(flac)[0]

@@ -940,6 +940,38 @@ def _apply_id3_container(path: Path, lyrics, cover, tags) -> None:
     audio.save()
 
 
+def ensure_file_writable(path: str | Path) -> Path:
+    """确保当前用户能写这个文件。
+
+    从 1Panel/SMB/root 复制进来的歌曲常常是 ``root:root 644``。服务以 ``wu``
+    运行时不能 chmod/chown 别人的文件，但只要父目录可写，就可以把内容复制到
+    同目录的临时文件、替换 inode，从而把文件变成当前用户所有。整个过程对
+    播放器是原子的，不会留下半写文件。
+    """
+    p = Path(path)
+    if not p.exists():
+        raise AudioError(f"文件不存在：{p}")
+    if os.access(p, os.W_OK):
+        return p
+    parent = p.parent
+    if not os.access(parent, os.W_OK):
+        raise AudioError(f"没有写入权限：{p}（所在目录也不可写，请修正目录所有者）")
+    temp = parent / f".{p.name}.morg-perm-{os.getpid()}.tmp"
+    try:
+        shutil.copy2(str(p), str(temp))
+        os.chmod(temp, 0o644)
+        with open(temp, "rb+") as handle:
+            os.fsync(handle.fileno())
+        os.replace(str(temp), str(p))
+    except Exception as exc:
+        try:
+            temp.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise AudioError(f"无法接管文件写入权限：{p}（{exc}）") from exc
+    return p
+
+
 def update_media(
     path: str | Path,
     lyrics: Optional[str] = None,
@@ -951,14 +983,10 @@ def update_media(
     - ``lyrics=None`` 表示不改歌词；空字符串表示删除歌词。
     - ``cover=None`` 表示不改封面；空元组不可用，删除封面请用 :func:`clear_cover`。
     """
-    p = Path(path)
-    if not p.exists():
-        raise AudioError(f"文件不存在：{p}")
+    p = ensure_file_writable(path)
     ext = ext_of(p)
     if ext not in WRITABLE_EXTS:
         raise UnsupportedFormat(f"暂不支持写入 .{ext.lstrip('.')} 格式")
-    if not os.access(p, os.W_OK):
-        raise AudioError(f"没有写入权限：{p}")
     if lyrics is None and cover is None and not tags:
         return {"changed": False}
 
@@ -987,7 +1015,7 @@ def update_media(
 
 def clear_cover(path: str | Path) -> None:
     """删除内嵌封面。"""
-    p = Path(path)
+    p = ensure_file_writable(path)
     ext = ext_of(p)
     if ext == ".flac":
         from mutagen.flac import FLAC
@@ -1123,6 +1151,8 @@ def prune_backups(backup_root: str | Path, max_backups: int = 300) -> int:
 def write_lrc_sidecar(path: str | Path, lyrics: str) -> str:
     p = Path(path)
     target = p.with_suffix(".lrc")
+    if target.exists():
+        ensure_file_writable(target)
     target.write_text(lyrics, encoding="utf-8")
     return str(target)
 
@@ -1132,6 +1162,8 @@ def write_cover_sidecar(path: str | Path, data: bytes) -> str:
     p = Path(path)
     _, ext = _sniff_image(data)
     target = p.with_suffix(ext)
+    if target.exists():
+        ensure_file_writable(target)
     target.write_bytes(data)
     return str(target)
 

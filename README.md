@@ -650,6 +650,25 @@ find "/home/pi/Music" -type f ! -writable | wc -l
 - 写入前有备份，可撤销；
 - 个别播放器/网盘对 24bit FLAC 的封面块兼容性差，建议保留原始文件备份。
 
+### 4.1 新歌提示「没有写入权限」？
+
+从 1Panel、SMB 或 root 用户复制进来的文件常常是 `root:root 644`，服务用户 `wu` 不能直接写入。
+v1.3.7 起有三层保护：
+
+1. **自动接管文件**：只要歌曲所在目录可写，插件会把文件原子复制成自己可写的新 inode，再写标签；
+2. **权限守护定时器**：安装脚本会启用 `music-organizer-perms.timer`，每分钟把音乐目录里新出现的
+   root 文件/目录归还给服务用户；
+3. **明确错误**：如果目录本身也不可写，会提示先修正目录所有者，而不是笼统报文件错误。
+
+检查守护是否运行：
+
+```bash
+systemctl status music-organizer-perms.timer
+sudo /usr/local/sbin/music-organizer-fix-perms
+```
+
+如果目录是 root 所有，执行一次上面的修复脚本即可；以后新导入的文件会自动处理。
+
 ### 5. Navidrome 里看不到新歌词/封面？
 
 - 在设置里点「立即扫描」，或等下一次自动扫描；

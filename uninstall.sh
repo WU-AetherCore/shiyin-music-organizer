@@ -10,12 +10,13 @@ if [[ "${EUID}" -ne 0 ]]; then
   exit 1
 fi
 
-for unit in music-organizer.service music-organizer-auto.service; do
+for unit in music-organizer.service music-organizer-auto.service music-organizer-perms.timer music-organizer-perms.service; do
   if systemctl list-unit-files "$unit" >/dev/null 2>&1; then
     systemctl disable --now "$unit" 2>/dev/null || true
     rm -f "/etc/systemd/system/$unit"
   fi
 done
+rm -f /usr/local/sbin/music-organizer-fix-perms
 systemctl daemon-reload
 
 if [[ -L /usr/local/bin/morg ]]; then
