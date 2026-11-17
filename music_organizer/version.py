@@ -1,6 +1,6 @@
 """版本与品牌信息。"""
 
-__version__ = "1.2.3"
+__version__ = "1.3.0"
 
 APP_TITLE = "本地音乐整理小插件"
 APP_SUBTITLE = "Local Music Organizer"

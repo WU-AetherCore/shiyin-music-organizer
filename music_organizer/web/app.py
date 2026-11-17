@@ -16,6 +16,7 @@ from ..logging_setup import get_logger, setup_logging
 from ..paths import AppPaths, get_paths
 from .api import bp as api_bp
 from .api import media as media_bp
+from .files_api import bp as files_bp
 
 log = get_logger("app")
 
@@ -42,7 +43,7 @@ def create_app(
     )
     app.config.update(
         SECRET_KEY=config.get("web.secret") or secrets.token_hex(32),
-        MAX_CONTENT_LENGTH=20 * 1024 * 1024,
+        MAX_CONTENT_LENGTH=2 * 1024 * 1024 * 1024,
         SESSION_COOKIE_HTTPONLY=True,
         SESSION_COOKIE_SAMESITE="Lax",
         SESSION_COOKIE_NAME="morg_session",
@@ -64,6 +65,7 @@ def create_app(
 
     app.register_blueprint(api_bp)
     app.register_blueprint(media_bp)
+    app.register_blueprint(files_bp)
 
     # ------------------------------------------------------------------
     @app.before_request

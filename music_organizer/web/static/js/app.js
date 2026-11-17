@@ -153,6 +153,11 @@ const state = {
   folder: { path: '', parent: '', roots: [], dirs: [], audio_count: 0, mandatory: false },
   candidates: { data: null, kind: 'lyrics', trackId: 0, loading: false },
   trackDetail: null,
+  files: {
+    path: '', root: '', breadcrumbs: [], entries: [], disk: {},
+    loading: false, error: '', q: '', sort: 'name', selected: new Set(),
+    original: null, historyCount: 0, plan: null, dirs: [], seq: 0, searchTimer: null,
+  },
   autoFixed: new Set(),
   lrcStats: null,
   lrcLoading: false,
@@ -321,6 +326,7 @@ function updateShell() {
 const PAGE_META = {
   dashboard: ['概览', '欢迎回来，这里是你的本地曲库'],
   library: ['音乐库', '浏览、播放与批量修复'],
+  files: ['文件管理', '浏览、整理与导入当前音乐目录'],
   repair: ['修复中心', '让每一首歌都有正确的歌词与封面'],
   automation: ['自动化', '让整理工作在后台自动完成'],
   settings: ['设置', '目录、数据源与访问方式'],
@@ -349,6 +355,7 @@ async function route() {
   }
   if (r === 'dashboard') renderDashboard();
   else if (r === 'library') { renderLibrary(); loadLibrary(); }
+  else if (r === 'files') { renderFiles(); loadFiles(); }
   else if (r === 'repair') renderRepair();
   else if (r === 'automation') renderAutomation();
   else if (r === 'settings') { await loadSettings(); renderSettings(); }
@@ -785,6 +792,491 @@ function renderJobPanel(job) {
     <div class="job-log">${logs || '<span class="dim">等待日志…</span>'}</div>
     ${items ? `<div class="job-items">${items}</div>` : ''}`;
 }
+
+/* -------------------------------------------------------------------------
+   文件管理
+   ------------------------------------------------------------------------- */
+
+const FILE_ICONS = {
+  folder: ICONS.folder,
+  audio: ICONS.play,
+  image: ICONS.image,
+  text: ICONS.lyrics,
+  other: ICONS.duplicate,
+};
+
+function fileLabel(kind) {
+  return ({ folder: '文件夹', audio: '音频', image: '图片', text: '文本', other: '文件' })[kind] || '文件';
+}
+
+function fileSelectedPaths() {
+  return Array.from(state.files.selected);
+}
+
+function fileEntryRow(entry) {
+  const selected = state.files.selected.has(entry.path);
+  const isAudio = entry.kind === 'audio';
+  const isText = entry.kind === 'text';
+  return `<div class="file-row ${selected ? 'selected' : ''}" data-file-path="${esc(entry.path)}">
+    <div class="file-check"><input type="checkbox" data-file-select="${esc(entry.path)}" ${selected ? 'checked' : ''} aria-label="选择 ${esc(entry.name)}"></div>
+    <div class="file-main">
+      <span class="file-ic ${entry.kind}">${FILE_ICONS[entry.kind] || FILE_ICONS.other}</span>
+      <div style="min-width:0">
+        <button class="file-name" data-action="${entry.is_dir ? 'file-open' : (isAudio && entry.track_id ? 'file-track' : isText ? 'file-edit-text' : 'file-download')}" data-path="${esc(entry.path)}" data-id="${entry.track_id || 0}" title="${esc(entry.name)}">${esc(entry.name)}</button>
+        <div class="file-sub">${entry.is_dir ? '文件夹' : (entry.ext || '文件')}${isAudio && entry.track_id ? ' · 已入库' : ''}</div>
+      </div>
+    </div>
+    <div class="file-col file-col-kind">${fileLabel(entry.kind)}</div>
+    <div class="file-size file-col-size">${entry.is_dir ? '—' : fmtSize(entry.size)}</div>
+    <div class="file-col file-col-modified">${entry.modified ? relativeTime(entry.modified) : ''}</div>
+    <div class="file-actions">
+      ${entry.is_dir ? `<button class="file-mini" data-action="file-open" data-path="${esc(entry.path)}">打开</button>` : ''}
+      ${isAudio && entry.track_id ? `<button class="file-mini" data-action="file-track" data-id="${entry.track_id}">详情</button>` : ''}
+      ${isText ? `<button class="file-mini" data-action="file-edit-text" data-path="${esc(entry.path)}">编辑</button>` : ''}
+      ${!entry.is_dir ? `<button class="file-mini" data-action="file-download" data-path="${esc(entry.path)}">下载</button>` : ''}
+      <button class="file-mini" data-action="file-rename" data-path="${esc(entry.path)}" data-name="${esc(entry.name)}">改名</button>
+      <button class="file-mini danger" data-action="file-delete" data-path="${esc(entry.path)}">删除</button>
+    </div>
+  </div>`;
+}
+
+function renderFiles() {
+  const f = state.files;
+  const root = f.root || state.overview?.music_dir || '';
+  const crumbs = (f.breadcrumbs || []).map((crumb, index, list) => {
+    const current = index === list.length - 1;
+    return `${index ? '<span class="files-crumb-sep">/</span>' : ''}<button class="files-crumb ${current ? 'current' : ''}" data-action="file-open" data-path="${esc(crumb.path)}">${esc(crumb.name)}</button>`;
+  }).join('');
+  const selected = f.selected.size;
+  const entries = f.entries || [];
+  const error = f.error ? `<div class="empty" style="padding:20px"><p style="color:var(--red)">${esc(f.error)}</p><button class="btn btn-ghost btn-sm" data-action="file-open" data-path="">回到根目录</button> <button class="btn btn-ghost btn-sm" data-action="file-refresh">重试</button></div>` : '';
+  $('#view').innerHTML = `
+    <div class="files-page">
+      <div class="files-actions">
+        <button class="btn btn-primary btn-sm" data-action="file-upload">${ICONS.upload}<span>导入文件</span></button>
+        <button class="btn btn-ghost btn-sm" data-action="file-mkdir">新建文件夹</button>
+        <button class="btn btn-ghost btn-sm" data-action="file-organize">一键整理</button>
+        <button class="btn btn-ghost btn-sm" data-action="file-rename-batch">批量命名</button>
+        <button class="btn btn-ghost btn-sm" data-action="file-repair">一键修复</button>
+        <button class="btn btn-ghost btn-sm" data-action="file-history">${ICONS.clock}<span>历史</span></button>
+        <button class="btn btn-ghost btn-sm" data-action="file-restore-original">${ICONS.shield}<span>恢复原始</span></button>
+      </div>
+
+      <div class="files-root">
+        <span class="files-root-icon">${ICONS.folder}</span>
+        <div class="files-root-main">
+          <div class="files-root-label">音乐目录</div>
+          <div class="files-root-path">${esc(root || '未选择')}</div>
+          <div class="files-root-meta">${f.disk?.free ? `剩余 ${fmtSize(f.disk.free)} / ${fmtSize(f.disk.total)}` : '正在读取磁盘信息…'}${f.original?.exists ? ` · 原始快照 ${esc(f.original.created_at || '')}` : ' · 尚未修改'}</div>
+        </div>
+        <button class="btn btn-ghost btn-sm" data-action="file-refresh">${ICONS.refresh}<span>刷新</span></button>
+      </div>
+
+      <div class="files-toolbar card card-pad" style="padding:12px 14px">
+        <div class="files-breadcrumbs">${crumbs}</div>
+        <div class="file-selection">${selected ? `已选 ${selected} 项` : `共 ${f.entries?.length || 0} 项`}</div>
+        <input class="input files-search" id="fileSearch" value="${esc(f.q)}" placeholder="搜索当前文件夹">
+        <select class="select files-select" id="fileSort">
+          <option value="name" ${f.sort === 'name' ? 'selected' : ''}>名称</option>
+          <option value="modified" ${f.sort === 'modified' ? 'selected' : ''}>修改时间</option>
+          <option value="size" ${f.sort === 'size' ? 'selected' : ''}>大小</option>
+          <option value="type" ${f.sort === 'type' ? 'selected' : ''}>类型</option>
+        </select>
+        ${selected ? `<button class="btn btn-ghost btn-sm" data-action="file-copy">复制到</button><button class="btn btn-ghost btn-sm" data-action="file-move">移动到</button><button class="btn btn-danger btn-sm" data-action="file-delete-selected">删除</button>` : ''}
+        ${f.loading ? '<span class="dim" style="font-size:10px">加载中…</span>' : ''}
+      </div>
+
+      ${error || `
+      <div class="files-list" id="fileDrop">
+        <div class="files-list-head">
+          <div class="file-check"><input type="checkbox" id="fileSelectAll" ${entries.length && selected === entries.length ? 'checked' : ''} aria-label="全选"></div>
+          <div>名称</div><div class="file-col-kind">类型</div><div class="file-col-size">大小</div><div class="file-col-modified">修改时间</div><div style="text-align:right">操作</div>
+        </div>
+        ${entries.length ? entries.map(fileEntryRow).join('') : `<div class="file-empty"><span class="empty-icon">${ICONS.folder}</span><div>这个文件夹是空的</div><div style="margin-top:6px">可以导入文件，或新建文件夹。</div></div>`}
+      </div>`}
+
+      <div class="file-footer">
+        <span>${f.dirs || 0} 个文件夹 · ${f.files || 0} 个文件</span>
+        <span>删除进入应用回收站，可撤销</span>
+        <span class="spacer"></span>
+        <span>${f.original?.exists ? `原始快照：${f.original.file_count} 个文件` : '原始快照将在第一次修改前建立'}</span>
+        <span>历史：${f.historyCount || 0} 次</span>
+      </div>
+    </div>`;
+}
+
+async function loadFiles() {
+  const f = state.files;
+  const seq = ++f.seq;
+  const keepSearch = document.activeElement && document.activeElement.id === 'fileSearch';
+  f.loading = true;
+  f.error = '';
+  if (state.route === 'files') {
+    renderFiles();
+    if (keepSearch) {
+      const input = $('#fileSearch');
+      if (input) { input.focus(); input.setSelectionRange(input.value.length, input.value.length); }
+    }
+  }
+  try {
+    const params = new URLSearchParams({ path: f.path || '', q: f.q || '', sort: f.sort || 'name' });
+    const data = await api(`/api/files?${params.toString()}`);
+    if (seq !== f.seq) return;
+    f.root = data.root || '';
+    f.path = data.path || '';
+    f.breadcrumbs = data.breadcrumbs || [];
+    f.entries = data.entries || [];
+    f.disk = data.disk || {};
+    f.dirs = data.dirs || 0;
+    f.files = data.files || 0;
+    f.original = data.original || null;
+    f.historyCount = data.history_count || 0;
+    const existing = new Set(f.entries.map((item) => item.path));
+    f.selected = new Set(Array.from(f.selected).filter((path) => existing.has(path)));
+  } catch (err) {
+    if (seq !== f.seq) return;
+    f.error = err.message;
+  } finally {
+    if (seq === f.seq) f.loading = false;
+  }
+  if (state.route === 'files') {
+    renderFiles();
+    if (keepSearch) {
+      const input = $('#fileSearch');
+      if (input) { input.focus(); input.setSelectionRange(input.value.length, input.value.length); }
+    }
+  }
+}
+
+async function fileOpen(path) {
+  state.files.path = path || '';
+  state.files.selected.clear();
+  state.files.q = '';
+  await loadFiles();
+}
+
+async function fileRefresh() {
+  await loadFiles();
+  toast('已刷新', 'ok', 1200);
+}
+
+function fileAskName(title, value, action) {
+  openModal(`
+    <div class="modal-head"><div><div class="modal-title">${esc(title)}</div></div><button class="icon-btn modal-close" data-action="modal-cancel">${ICONS.close}</button></div>
+    <div class="modal-body">
+      <label class="field"><span>名称</span><input class="input" id="fileNameInput" value="${esc(value || '')}" autofocus></label>
+    </div>
+    <div class="modal-foot"><div class="spacer"></div><button class="btn btn-ghost" data-action="modal-cancel">取消</button><button class="btn btn-primary" data-action="${action}">确定</button></div>`);
+}
+
+async function fileMkdir() {
+  fileAskName('新建文件夹', '', 'file-mkdir-submit');
+}
+
+async function fileRenamePrompt(path, name) {
+  state.files.renamePath = path;
+  fileAskName('重命名', name, 'file-rename-submit');
+}
+
+async function fileMkdirSubmit() {
+  const name = ($('#fileNameInput')?.value || '').trim();
+  if (!name) { toast('请输入文件夹名称', 'err'); return; }
+  try {
+    await api('/api/files/mkdir', { method: 'POST', body: { path: state.files.path, name } });
+    closeModal(); toast('文件夹已创建', 'ok'); await loadFiles();
+  } catch (err) { toast(err.message, 'err'); }
+}
+
+async function fileRenameSubmit() {
+  const name = ($('#fileNameInput')?.value || '').trim();
+  if (!name) { toast('请输入新名称', 'err'); return; }
+  try {
+    await api('/api/files/rename', { method: 'POST', body: { path: state.files.renamePath, name } });
+    closeModal(); toast('已重命名', 'ok'); await loadFiles(); loadOverview().catch(() => {});
+  } catch (err) { toast(err.message, 'err'); }
+}
+
+async function fileDelete(paths) {
+  if (!paths || !paths.length) return;
+  const ok = await confirmDialog('删除到回收站？', `将移动 ${paths.length} 项到应用回收站，可在历史里撤销。`, '删除');
+  if (!ok) return;
+  try {
+    await api('/api/files/delete', { method: 'POST', body: { paths } });
+    state.files.selected.clear();
+    toast('已移入回收站', 'ok'); await loadFiles(); loadOverview().catch(() => {});
+  } catch (err) { toast(err.message, 'err'); }
+}
+
+async function fileTransfer(copy) {
+  const paths = fileSelectedPaths();
+  if (!paths.length) { toast('请先选择文件', 'err'); return; }
+  try {
+    const data = await api('/api/files/dirs');
+    state.files.dirs = data.dirs || [];
+  } catch (err) { toast(err.message, 'err'); return; }
+  const options = state.files.dirs.map((item) => `<option value="${esc(item.path)}" ${item.path === state.files.path ? 'selected' : ''}>${esc(item.name)}</option>`).join('');
+  openModal(`
+    <div class="modal-head"><div><div class="modal-title">${copy ? '复制到' : '移动到'}</div><div class="modal-sub">${paths.length} 项</div></div><button class="icon-btn modal-close" data-action="modal-cancel">${ICONS.close}</button></div>
+    <div class="modal-body">
+      <label class="field"><span>目标文件夹</span><select class="select" id="fileDest">${options}</select></label>
+      <p class="file-modal-note">目标文件夹必须在当前音乐目录内；同名文件会自动加序号，不会覆盖。</p>
+    </div>
+    <div class="modal-foot"><div class="spacer"></div><button class="btn btn-ghost" data-action="modal-cancel">取消</button><button class="btn btn-primary" data-action="${copy ? 'file-copy-submit' : 'file-move-submit'}">${copy ? '复制' : '移动'}</button></div>`);
+  state.files.transferCopy = copy;
+}
+
+async function fileTransferSubmit(copy) {
+  const dest = $('#fileDest')?.value || '';
+  const paths = fileSelectedPaths();
+  try {
+    await api(copy ? '/api/files/copy' : '/api/files/move', { method: 'POST', body: { paths, dest } });
+    closeModal(); state.files.selected.clear(); toast(copy ? '复制完成' : '移动完成', 'ok');
+    await loadFiles(); loadOverview().catch(() => {});
+  } catch (err) { toast(err.message, 'err'); }
+}
+
+function fileUploadPrompt() {
+  openModal(`
+    <div class="modal-head"><div><div class="modal-title">导入文件</div><div class="modal-sub">上传到 ${esc(state.files.path || '根目录')}</div></div><button class="icon-btn modal-close" data-action="modal-cancel">${ICONS.close}</button></div>
+    <div class="modal-body">
+      <input type="file" id="fileUploadInput" multiple accept="audio/*,.flac,.mp3,.m4a,.ogg,.opus,.wav,.aiff,.ape,.wv,.lrc,.jpg,.jpeg,.png,.webp,.txt,.nfo">
+      <p class="file-modal-note">支持音频、封面、.lrc 和文本；上传后会自动进入曲库索引。大文件请保持页面打开。</p>
+      <div class="file-progress" id="fileUploadProgress" style="display:none"><span></span></div>
+      <div id="fileUploadStatus" class="file-modal-note"></div>
+    </div>
+    <div class="modal-foot"><div class="spacer"></div><button class="btn btn-ghost" data-action="modal-cancel">取消</button><button class="btn btn-primary" data-action="file-upload-submit">开始上传</button></div>`);
+}
+
+function fileUploadSubmit() {
+  const input = $('#fileUploadInput');
+  if (!input || !input.files || !input.files.length) { toast('请选择文件', 'err'); return; }
+  const form = new FormData();
+  form.append('path', state.files.path || '');
+  Array.from(input.files).forEach((file) => form.append('files', file));
+  const bar = $('#fileUploadProgress');
+  const status = $('#fileUploadStatus');
+  if (bar) bar.style.display = '';
+  if (status) status.textContent = '正在上传…';
+  const xhr = new XMLHttpRequest();
+  xhr.open('POST', '/api/files/upload');
+  xhr.upload.onprogress = (event) => {
+    if (event.lengthComputable && bar) {
+      bar.firstElementChild.style.width = `${Math.round((event.loaded / event.total) * 100)}%`;
+    }
+  };
+  xhr.onload = async () => {
+    let data = {};
+    try { data = JSON.parse(xhr.responseText || '{}'); } catch (err) { /* ignore */ }
+    if (xhr.status >= 200 && xhr.status < 300 && data.ok !== false) {
+      const saved = (data.saved || []).length;
+      const errors = data.errors || [];
+      closeModal();
+      toast(`已导入 ${saved} 个文件${errors.length ? `，${errors.length} 个失败` : ''}`, errors.length ? 'err' : 'ok');
+      await loadFiles(); loadOverview().catch(() => {});
+    } else {
+      if (status) status.textContent = data.error || '上传失败';
+      toast(data.error || '上传失败', 'err');
+    }
+  };
+  xhr.onerror = () => { if (status) status.textContent = '网络错误'; toast('上传失败', 'err'); };
+  xhr.send(form);
+}
+
+async function fileEditText(path) {
+  try {
+    const data = await api(`/api/files/text?path=${encodeURIComponent(path)}`);
+    openModal(`
+      <div class="modal-head"><div><div class="modal-title">编辑 ${esc(path.split('/').pop())}</div><div class="modal-sub">${esc(path)}</div></div><button class="icon-btn modal-close" data-action="modal-cancel">${ICONS.close}</button></div>
+      <div class="modal-body">
+        <textarea class="textarea file-edit-area" id="fileTextArea">${esc(data.text || '')}</textarea>
+        <p class="file-modal-note">保存会覆盖原文件；历史里可以撤销。最大 2 MB。</p>
+      </div>
+      <div class="modal-foot"><div class="spacer"></div><button class="btn btn-ghost" data-action="modal-cancel">取消</button><button class="btn btn-primary" data-action="file-save-text" data-path="${esc(path)}">保存</button></div>`, { wide: true });
+  } catch (err) { toast(err.message, 'err'); }
+}
+
+async function fileSaveText(path) {
+  const text = $('#fileTextArea')?.value || '';
+  try {
+    await api('/api/files/text', { method: 'PUT', body: { path, text } });
+    closeModal(); toast('文本已保存', 'ok'); await loadFiles();
+  } catch (err) { toast(err.message, 'err'); }
+}
+
+async function fileOpenHistory() {
+  try {
+    const data = await api('/api/files/history?limit=30');
+    const items = data.items || [];
+    const rows = items.map((item) => `<div class="file-history-item ${item.undone ? 'undone' : ''}">
+      <div class="file-history-main"><div class="file-history-title">${esc(item.action || '操作')}</div><div class="file-history-sub">${esc(item.summary || '')} · ${esc(item.ts || '')}${item.undone ? ' · 已撤销' : ''}</div></div>
+      <div class="file-history-actions">${item.can_undo ? `<button class="file-mini" data-action="file-undo-to" data-id="${esc(item.id)}">撤销到此</button>` : ''}</div>
+    </div>`).join('') || '<div class="file-empty" style="padding:24px">还没有操作记录</div>';
+    openModal(`
+      <div class="modal-head"><div><div class="modal-title">操作历史</div><div class="modal-sub">保留最近 ${data.limit} 次 · 原始快照永久保留</div></div><button class="icon-btn modal-close" data-action="modal-cancel">${ICONS.close}</button></div>
+      <div class="modal-body">
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
+          <button class="btn btn-soft btn-sm" data-action="file-undo" ${data.undoable ? '' : 'disabled'}>撤销上一步</button>
+          <button class="btn btn-danger btn-sm" data-action="file-restore-original">恢复到原始目录</button>
+        </div>
+        <p class="file-modal-note">原始快照：${data.original?.exists ? `${esc(data.original.created_at)} · ${data.original.file_count} 个文件` : '尚未建立（第一次修改前会自动建立）'}</p>
+        <div class="file-history" style="margin-top:12px">${rows}</div>
+      </div>
+      <div class="modal-foot"><div class="spacer"></div><button class="btn btn-ghost" data-action="modal-cancel">关闭</button></div>`, { wide: true });
+  } catch (err) { toast(err.message, 'err'); }
+}
+
+async function fileUndo(operationId = '') {
+  try {
+    const data = await api('/api/files/undo', { method: 'POST', body: operationId ? { operation_id: operationId } : {} });
+    const errors = data.errors || [];
+    toast(errors.length ? `已撤销，${errors.length} 项失败` : '已撤销', errors.length ? 'err' : 'ok');
+    closeModal(); await loadFiles(); loadOverview().catch(() => {});
+  } catch (err) { toast(err.message, 'err'); }
+}
+
+async function fileRestoreOriginal() {
+  const ok = await confirmDialog('恢复到原始目录？', '将撤销所有文件操作，并按第一次修改前的快照恢复路径；多余文件会移入回收站。音频内容不会被重新编码。', '恢复');
+  if (!ok) return;
+  try {
+    const data = await api('/api/files/restore-original', { method: 'POST', body: {} });
+    closeModal();
+    toast(`已恢复 ${data.restored || 0} 个文件${data.missing?.length ? `，${data.missing.length} 个缺失` : ''}`, data.missing?.length ? 'err' : 'ok');
+    await loadFiles(); loadOverview().catch(() => {});
+  } catch (err) { toast(err.message, 'err'); }
+}
+
+function fileOrganizePreviewHtml(data, kind) {
+  const rows = (data.items || []).slice(0, 30).map((item) => `<div class="file-plan-row"><span class="from">${esc(item.source)}</span><span>→</span><span class="to">${esc(item.target || item.reason || '')}</span></div>`).join('');
+  return `<div class="file-plan">
+    <div class="file-plan-summary"><span>可处理 ${data.planned || 0}</span><span>跳过 ${data.skipped || 0}</span><span>错误 ${data.errors || 0}</span><span>只预览，尚未修改</span></div>
+    <div class="file-plan-list">${rows || '<div class="dim" style="font-size:11px">没有需要移动的文件</div>'}${(data.items || []).length > 30 ? '<div class="dim" style="font-size:10px;margin-top:8px">只显示前 30 项…</div>' : ''}</div>
+  </div>`;
+}
+
+function fileOrganizeModal() {
+  openModal(`
+    <div class="modal-head"><div><div class="modal-title">一键整理</div><div class="modal-sub">按标签把歌曲移动到规范的歌手/专辑目录</div></div><button class="icon-btn modal-close" data-action="modal-cancel">${ICONS.close}</button></div>
+    <div class="modal-body">
+      <div class="form-row"><div class="form-label">目录结构</div>
+        <select class="select" id="organizeMode">
+          <option value="artist_album">歌手 / 专辑</option>
+          <option value="artist">歌手</option>
+          <option value="album">专辑</option>
+          <option value="genre">流派</option>
+          <option value="year">年份</option>
+          <option value="custom">自定义目录模板</option>
+        </select>
+      </div>
+      <div class="form-row" id="organizeDirWrap"><div class="form-label">目录模板 <span class="hint">例如 {artist}/{album}</span></div><input class="input" id="organizeDirTemplate" value="{artist}/{album}"></div>
+      <div class="form-row"><div class="form-label">文件名</div>
+        <select class="select" id="organizeFileMode">
+          <option value="keep">保持原文件名</option>
+          <option value="artist_title">歌手 - 歌名</option>
+          <option value="title_artist">歌名 - 歌手</option>
+          <option value="track_title">序号 - 歌名</option>
+          <option value="title">只使用歌名</option>
+          <option value="custom">自定义文件名模板</option>
+        </select>
+      </div>
+      <div class="form-row" id="organizeFileWrap" style="display:none"><div class="form-label">文件名模板</div><input class="input" id="organizeFileTemplate" value="{artist} - {title}"></div>
+      <p class="file-modal-note">可用变量：{artist} {album} {title} {track} {year} {genre}。预览确认后才会移动；同名文件会自动加序号。</p>
+      <div id="organizePreview"></div>
+    </div>
+    <div class="modal-foot"><div class="spacer"></div><button class="btn btn-ghost" data-action="modal-cancel">取消</button><button class="btn btn-soft" data-action="file-organize-preview">预览</button><button class="btn btn-primary" data-action="file-organize-apply" id="organizeApply" disabled>开始整理</button></div>`, { wide: true });
+  setTimeout(() => { const wrap = $('#organizeDirWrap'); if (wrap) wrap.style.display = 'none'; }, 0);
+}
+
+function fileRenameBatchModal() {
+  openModal(`
+    <div class="modal-head"><div><div class="modal-title">批量命名</div><div class="modal-sub">只改文件名，不移动文件夹</div></div><button class="icon-btn modal-close" data-action="modal-cancel">${ICONS.close}</button></div>
+    <div class="modal-body">
+      <div class="form-row"><div class="form-label">命名规则</div>
+        <select class="select" id="renameMode">
+          <option value="artist_title">歌手 - 歌名</option>
+          <option value="title_artist">歌名 - 歌手</option>
+          <option value="track_title">序号 - 歌名</option>
+          <option value="title">只使用歌名</option>
+          <option value="custom">自定义模板</option>
+        </select>
+      </div>
+      <div class="form-row" id="renameTemplateWrap" style="display:none"><div class="form-label">文件名模板</div><input class="input" id="renameTemplate" value="{artist} - {title}"></div>
+      <p class="file-modal-note">可用变量：{artist} {album} {title} {track} {year} {genre}。预览确认后才会修改。</p>
+      <div id="renamePreview"></div>
+    </div>
+    <div class="modal-foot"><div class="spacer"></div><button class="btn btn-ghost" data-action="modal-cancel">取消</button><button class="btn btn-soft" data-action="file-rename-preview">预览</button><button class="btn btn-primary" data-action="file-rename-apply" id="renameApply" disabled>开始命名</button></div>`, { wide: true });
+  setTimeout(() => { const wrap = $('#renameTemplateWrap'); if (wrap) wrap.style.display = 'none'; }, 0);
+}
+
+async function fileOrganizePreview() {
+  const mode = $('#organizeMode')?.value || 'artist_album';
+  const fileMode = $('#organizeFileMode')?.value || 'keep';
+  const fileTemplates = {
+    keep: '',
+    artist_title: '{artist} - {title}',
+    title_artist: '{title} - {artist}',
+    track_title: '{track:02d} - {title}',
+    title: '{title}',
+  };
+  const fileTemplate = fileMode === 'custom' ? ($('#organizeFileTemplate')?.value || '') : (fileTemplates[fileMode] || '');
+  try {
+    const data = await api('/api/files/organize/preview', {
+      method: 'POST',
+      body: { mode, dir_template: $('#organizeDirTemplate')?.value || '', file_template: fileTemplate },
+    });
+    state.files.plan = data.plan_id;
+    $('#organizePreview').innerHTML = fileOrganizePreviewHtml(data, 'organize');
+    $('#organizeApply').disabled = !data.planned;
+  } catch (err) { toast(err.message, 'err'); }
+}
+
+async function fileOrganizeApply() {
+  if (!state.files.plan) return;
+  const ok = await confirmDialog('开始整理？', '会按预览移动文件；原始目录和这次操作都可以在历史里恢复。', '开始整理');
+  if (!ok) return;
+  try {
+    const data = await api('/api/files/plan/apply', { method: 'POST', body: { plan_id: state.files.plan } });
+    state.files.plan = null; closeModal();
+    toast(`整理完成：${data.applied || 0} 个文件${data.errors?.length ? `，${data.errors.length} 个失败` : ''}`, data.errors?.length ? 'err' : 'ok');
+    await loadFiles(); loadOverview().catch(() => {});
+  } catch (err) { toast(err.message, 'err'); }
+}
+
+async function fileRenamePreview() {
+  const mode = $('#renameMode')?.value || 'artist_title';
+  const template = mode === 'custom' ? ($('#renameTemplate')?.value || '') : '';
+  try {
+    const data = await api('/api/files/rename/preview', { method: 'POST', body: { mode, file_template: template } });
+    state.files.plan = data.plan_id;
+    $('#renamePreview').innerHTML = fileOrganizePreviewHtml(data, 'rename');
+    $('#renameApply').disabled = !data.planned;
+  } catch (err) { toast(err.message, 'err'); }
+}
+
+async function fileRenameApply() {
+  if (!state.files.plan) return;
+  const ok = await confirmDialog('开始批量命名？', '会按预览修改文件名；原始名称可以在历史里恢复。', '开始命名');
+  if (!ok) return;
+  try {
+    const data = await api('/api/files/plan/apply', { method: 'POST', body: { plan_id: state.files.plan } });
+    state.files.plan = null; closeModal();
+    toast(`命名完成：${data.applied || 0} 个文件${data.errors?.length ? `，${data.errors.length} 个失败` : ''}`, data.errors?.length ? 'err' : 'ok');
+    await loadFiles(); loadOverview().catch(() => {});
+  } catch (err) { toast(err.message, 'err'); }
+}
+
+async function fileRepairLibrary() {
+  try {
+    const data = await api('/api/files/repair', { method: 'POST', body: {} });
+    if (!data.job_id) { toast(data.reason || '没有需要修复的内容', 'ok'); return; }
+    toast(`已提交修复：${data.count || ''} 首`, 'ok');
+    watchJob(data.job_id, { onDone: () => { loadFiles().catch(() => {}); loadOverview().catch(() => {}); } });
+  } catch (err) { toast(err.message, 'err'); }
+}
+
+function fileDownload(path) {
+  window.location.href = `/api/files/download?path=${encodeURIComponent(path)}`;
+}
+
 
 function renderRepair() {
   const o = state.overview;
@@ -2590,6 +3082,93 @@ async function handleAction(action, el, event) {
       break;
     case 'provider-toggle':
       break;
+    case 'file-open':
+      await fileOpen(el.dataset.path || '');
+      break;
+    case 'file-refresh':
+      await fileRefresh();
+      break;
+    case 'file-upload':
+      fileUploadPrompt();
+      break;
+    case 'file-upload-submit':
+      fileUploadSubmit();
+      break;
+    case 'file-mkdir':
+      await fileMkdir();
+      break;
+    case 'file-mkdir-submit':
+      await fileMkdirSubmit();
+      break;
+    case 'file-rename':
+      await fileRenamePrompt(el.dataset.path || '', el.dataset.name || '');
+      break;
+    case 'file-rename-submit':
+      await fileRenameSubmit();
+      break;
+    case 'file-delete':
+      await fileDelete([el.dataset.path || '']);
+      break;
+    case 'file-delete-selected':
+      await fileDelete(fileSelectedPaths());
+      break;
+    case 'file-copy':
+      await fileTransfer(true);
+      break;
+    case 'file-move':
+      await fileTransfer(false);
+      break;
+    case 'file-copy-submit':
+      await fileTransferSubmit(true);
+      break;
+    case 'file-move-submit':
+      await fileTransferSubmit(false);
+      break;
+    case 'file-track':
+      await openTrack(id);
+      break;
+    case 'file-download':
+      fileDownload(el.dataset.path || '');
+      break;
+    case 'file-edit-text':
+      await fileEditText(el.dataset.path || '');
+      break;
+    case 'file-save-text':
+      await fileSaveText(el.dataset.path || '');
+      break;
+    case 'file-history':
+      await fileOpenHistory();
+      break;
+    case 'file-undo':
+      await fileUndo();
+      break;
+    case 'file-undo-to':
+      await fileUndo(el.dataset.id || '');
+      break;
+    case 'file-restore-original':
+      await fileRestoreOriginal();
+      break;
+    case 'file-organize':
+      fileOrganizeModal();
+      break;
+    case 'file-organize-preview':
+      await fileOrganizePreview();
+      break;
+    case 'file-organize-apply':
+      await fileOrganizeApply();
+      break;
+    case 'file-rename-batch':
+      fileRenameBatchModal();
+      break;
+    case 'file-rename-preview':
+      await fileRenamePreview();
+      break;
+    case 'file-rename-apply':
+      await fileRenameApply();
+      break;
+    case 'file-repair':
+      await fileRepairLibrary();
+      break;
     default:
       break;
   }
@@ -2708,6 +3287,37 @@ function bindEvents() {
 
   document.addEventListener('change', (event) => {
     const target = event.target;
+    if (target.matches('[data-file-select]')) {
+      const path = target.dataset.fileSelect;
+      if (target.checked) state.files.selected.add(path); else state.files.selected.delete(path);
+      renderFiles();
+      return;
+    }
+    if (target.id === 'fileSelectAll') {
+      state.files.selected = target.checked ? new Set(state.files.entries.map((item) => item.path)) : new Set();
+      renderFiles();
+      return;
+    }
+    if (target.id === 'fileSort') {
+      state.files.sort = target.value;
+      loadFiles();
+      return;
+    }
+    if (target.id === 'organizeMode') {
+      const wrap = $('#organizeDirWrap');
+      if (wrap) wrap.style.display = target.value === 'custom' ? '' : 'none';
+      return;
+    }
+    if (target.id === 'organizeFileMode') {
+      const wrap = $('#organizeFileWrap');
+      if (wrap) wrap.style.display = target.value === 'custom' ? '' : 'none';
+      return;
+    }
+    if (target.id === 'renameMode') {
+      const wrap = $('#renameTemplateWrap');
+      if (wrap) wrap.style.display = target.value === 'custom' ? '' : 'none';
+      return;
+    }
     if (target.matches('[data-select-id]')) {
       const id = Number(target.dataset.selectId);
       if (target.checked) state.selected.add(id); else state.selected.delete(id);
@@ -2742,6 +3352,12 @@ function bindEvents() {
   });
 
   document.addEventListener('input', (event) => {
+    if (event.target.id === 'fileSearch') {
+      state.files.q = event.target.value;
+      clearTimeout(state.files.searchTimer);
+      state.files.searchTimer = setTimeout(() => loadFiles(), 260);
+      return;
+    }
     if (event.target.id === 'volume' || event.target.id === 'npVolume') {
       const value = Number(event.target.value);
       audio.volume = value / 100;
