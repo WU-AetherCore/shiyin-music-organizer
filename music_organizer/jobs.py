@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any, Callable, Deque, Dict, List, Optional, Sequence
 
 from . import db, scanner
+from . import conversion
 from .config import Config
 from .paths import AppPaths, get_paths
 from .repair import RepairService, track_display
@@ -284,6 +285,18 @@ def start_scan(config: Config, paths: Optional[AppPaths] = None, manager: Option
             _auto_fix_new(config, paths, manager, result.new_ids)
         except Exception as exc:
             job.log(f"自动修复排队失败：{exc}")
+        try:
+            if (
+                config.get("conversion.enabled")
+                and str(config.get("conversion.mode") or "preserve") != "preserve"
+                and config.get("conversion.replace_original", False)
+            ):
+                pending = conversion.candidates(config, paths)
+                if pending:
+                    start_convert(config, paths, manager, source="auto")
+                    job.log(f"格式转换已排队：{len(pending)} 首")
+        except Exception as exc:
+            job.log(f"自动格式转换排队失败：{exc}")
         return result.to_dict()
 
     return manager.submit("scan", "扫描曲库", runner, source="auto" if manager else "web")
@@ -384,6 +397,80 @@ def start_batch(
 
     label = title or f"批量修复 · {len(tracks)} 首"
     return manager.submit("repair", label, runner, source=source, meta={"filter": filter_name, "count": len(tracks)})
+
+
+def start_convert(
+    config: Config,
+    paths: Optional[AppPaths] = None,
+    manager: Optional[JobManager] = None,
+    ids: Optional[Sequence[int]] = None,
+    dry_run: bool = False,
+    limit: int = 0,
+    source: str = "web",
+) -> Optional[str]:
+    paths = paths or get_paths()
+    manager = manager or get_manager(config, paths)
+    running = manager.running("convert")
+    if running:
+        return running[0].id
+    pending = conversion.candidates(config, paths, ids=ids, limit=limit)
+    if not pending:
+        return None
+
+    def runner(job: Job) -> Dict[str, Any]:
+        job.total = len(pending)
+        job.message = "准备转换格式…"
+        changed: List[str] = []
+        for index, track in enumerate(pending, start=1):
+            if job.cancel_event.is_set():
+                break
+            job.current = track_display(track)[:80]
+            result = conversion.convert_file(track, config, paths, dry_run=dry_run)
+            status = result.get("status")
+            if status == "fixed":
+                job.succeeded += 1
+                if result.get("target"):
+                    changed.append(str(result["target"]))
+            elif status in ("skipped", "dry_run"):
+                job.skipped += 1
+            else:
+                job.failed += 1
+            job.add_item(
+                {
+                    "track_id": track.get("id"),
+                    "title": track_display(track),
+                    "status": status,
+                    "message": result.get("error") or result.get("reason") or result.get("target") or "",
+                }
+            )
+            job.progress(index, len(pending))
+        job.message = (
+            f"完成 {job.done}/{job.total}：成功 {job.succeeded}，跳过 {job.skipped}，失败 {job.failed}"
+            if not job.cancel_event.is_set()
+            else f"已取消（完成 {job.done}/{job.total}）"
+        )
+        config.set("conversion.last_run_at", _now())
+        config.set("conversion.last_ok", job.failed == 0)
+        config.set("conversion.last_result", job.message)
+        config.set("conversion.last_count", job.succeeded)
+        config.save()
+        if changed:
+            _notify_media_servers(config, paths, manager, job, changed_paths=changed)
+        return {
+            "total": job.total,
+            "succeeded": job.succeeded,
+            "skipped": job.skipped,
+            "failed": job.failed,
+            "dry_run": dry_run,
+        }
+
+    return manager.submit(
+        "convert",
+        f"格式转换 · {len(pending)} 首",
+        runner,
+        source=source,
+        meta={"dry_run": dry_run, "count": len(pending)},
+    )
 
 
 def start_single(

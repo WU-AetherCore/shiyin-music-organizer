@@ -13,7 +13,8 @@
       "node_modules",
       "__pycache__",
       "导出",
-      "Exports"
+      "Exports",
+      "转换输出"
     ],
     "extensions": [
       ".flac",
@@ -62,6 +63,14 @@
     "proxy": "",
     "min_score": 55,
     "parallel": true
+  },
+  "conversion": {
+    "enabled": false,
+    "mode": "preserve",
+    "target": "flac",
+    "rules": [{ "from": "wav", "to": "flac" }],
+    "replace_original": false,
+    "keep_backup": true
   },
   "playback": {
     "quality": "original"

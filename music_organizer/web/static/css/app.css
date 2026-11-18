@@ -626,6 +626,15 @@ h1, h2, h3, h4, p { margin: 0; }
 .auto-status-row .k { color: var(--muted); width: 100px; flex: none; }
 .auto-status-row .v { color: var(--text); }
 .auto-status-row .v.dim { color: var(--dim); }
+.switch-copy { min-width: 0; flex: 1; }
+.switch-copy b { display: block; font-size: 13px; font-weight: 550; color: var(--text); }
+.switch-copy span { display: block; margin-top: 3px; font-size: 11px; color: var(--dim); line-height: 1.5; }
+.conv-rules { display: flex; flex-direction: column; gap: 8px; }
+.conv-rule { display: grid; grid-template-columns: minmax(0, 1fr) 20px minmax(0, 1fr) 28px; gap: 6px; align-items: center; }
+.conv-rule .select { width: 100%; min-width: 0; }
+.conv-arrow { text-align: center; color: var(--dim); font-size: 13px; }
+.conv-rule .icon-btn { width: 28px; height: 28px; color: var(--dim); }
+.conv-rule .icon-btn:hover { color: var(--red); }
 
 /* ==========================================================================
    设置

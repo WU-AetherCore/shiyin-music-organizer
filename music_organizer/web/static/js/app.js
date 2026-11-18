@@ -1450,14 +1450,84 @@ function autoSwitch(key, title, desc, checked) {
   </div>`;
 }
 
+function conversionRuleHtml(from = 'wav', to = 'flac') {
+  const formatOptions = (selected, formats) => formats.map((f) => `<option value="${f}" ${f === selected ? 'selected' : ''}>${f.toUpperCase()}</option>`).join('');
+  return `<div class="conv-rule" data-conv-rule>
+    <select class="select conv-from">${formatOptions(from, ['flac','mp3','m4a','ogg','opus','wav','aiff','ape','wv'])}</select>
+    <span class="conv-arrow">→</span>
+    <select class="select conv-to">${formatOptions(to, ['flac','mp3','m4a','ogg','opus','wav'])}</select>
+    <button class="icon-btn" data-action="remove-conv-rule" title="删除规则">×</button>
+  </div>`;
+}
+
+function collectConversion() {
+  const rules = $$('#convRules .conv-rule').map((row) => ({
+    from: ($('.conv-from', row) || {}).value || '',
+    to: ($('.conv-to', row) || {}).value || '',
+  })).filter((rule) => rule.from && rule.to && rule.from !== rule.to);
+  return {
+    enabled: Boolean($('#convEnabled') && $('#convEnabled').checked),
+    mode: ($('#convMode') || {}).value || 'preserve',
+    target: ($('#convTarget') || {}).value || 'flac',
+    rules,
+    replace_original: Boolean($('#convReplace') && $('#convReplace').checked),
+    keep_backup: Boolean($('#convBackup') && $('#convBackup').checked),
+  };
+}
+
+async function saveConversion(showToast = true) {
+  const data = await api('/api/settings', { method: 'PUT', body: { config: { conversion: collectConversion() } } });
+  if (state.overview) state.overview.conversion = data.config.conversion;
+  if (showToast) toast('格式转换设置已保存');
+  return data.config.conversion;
+}
+
+async function previewConversion() {
+  const box = $('#convPreview');
+  if (box) box.textContent = '检测中…';
+  try {
+    const data = await api('/api/convert/preview');
+    if (box) box.textContent = `${data.count} 首待转换${data.items && data.items[0] ? ' · ' + data.items[0].title : ''}`;
+    toast(data.count ? `检测到 ${data.count} 首待转换` : '没有符合规则的待转换文件', 'ok');
+  } catch (err) {
+    if (box) box.textContent = '检测失败';
+    toast(err.message, 'err');
+  }
+}
+
+async function runConversion() {
+  try {
+    await saveConversion(false);
+    const data = await api('/api/convert/run', { method: 'POST', body: {} });
+    if (!data.job_id) {
+      toast('没有符合规则的待转换文件', 'ok');
+      return;
+    }
+    toast('已开始格式转换，进度可在下方任务面板查看');
+    watchJob(data.job_id, {
+      onDone: async () => {
+        await loadOverview();
+        renderAutomation();
+      },
+    });
+  } catch (err) {
+    toast(err.message, 'err');
+  }
+}
+
 function renderAutomation() {
   const o = state.overview;
   const a = o.automation || {};
+  const c = o.conversion || {};
   const status = a.status || {};
   const days = [1, 2, 3, 4, 5, 6, 7];
   const dayNames = ['一', '二', '三', '四', '五', '六', '日'];
   const activeDays = a.schedule_days || days;
   const job = state.job;
+  const convMode = c.mode || 'preserve';
+  const ruleRows = (c.rules && c.rules.length ? c.rules : [{ from: 'wav', to: 'flac' }]);
+  const convFormats = ['flac', 'mp3', 'm4a', 'ogg', 'opus', 'wav'];
+  const convOptions = (selected, list) => list.map((f) => `<option value="${f}" ${f === selected ? 'selected' : ''}>${f.toUpperCase()}</option>`).join('');
   $('#view').innerHTML = `
     <div class="automation">
       <div class="auto-grid">
@@ -1519,6 +1589,53 @@ function renderAutomation() {
           </div>
         </section>
         <section class="card job-panel" id="jobPanel">${renderJobPanel(job)}</section>
+      </div>
+
+      <div class="auto-grid">
+        <section class="card card-pad">
+          <div class="card-head"><div><div class="card-title">格式转换自动化</div><div class="card-sub">默认保持原格式；可整库转、按规则转，替换前自动备份</div></div>
+            <span class="status-pill ${c.enabled && convMode !== 'preserve' ? '' : 'off'}"><span class="dot"></span>${c.enabled && convMode !== 'preserve' ? '已启用' : '未启用'}</span></div>
+          <div class="switch-list">
+            <div class="switch-row"><div class="switch-copy"><b>启用自动转换</b><span>扫描到符合规则的文件后自动排队转换</span></div><label class="toggle"><input type="checkbox" id="convEnabled" ${c.enabled ? 'checked' : ''}><span></span></label></div>
+            <div class="switch-row"><div class="switch-copy"><b>替换原文件</b><span>关闭时输出到「转换输出」文件夹，不修改原文件</span></div><label class="toggle"><input type="checkbox" id="convReplace" ${c.replace_original ? 'checked' : ''}><span></span></label></div>
+            <div class="switch-row"><div class="switch-copy"><b>保留备份</b><span>替换原文件前保存标签、歌词、封面快照</span></div><label class="toggle"><input type="checkbox" id="convBackup" ${c.keep_backup !== false ? 'checked' : ''}><span></span></label></div>
+          </div>
+          <div class="form-inline" style="margin-top:16px">
+            <label class="field"><span>转换模式</span>
+              <select class="select" id="convMode">
+                <option value="preserve" ${convMode === 'preserve' ? 'selected' : ''}>保持原格式（默认）</option>
+                <option value="all" ${convMode === 'all' ? 'selected' : ''}>全部转为目标格式</option>
+                <option value="rules" ${convMode === 'rules' ? 'selected' : ''}>按来源规则转换</option>
+              </select>
+            </label>
+            <label class="field"><span>目标格式</span><select class="select" id="convTarget">${convOptions(c.target || 'flac', convFormats)}</select></label>
+          </div>
+          <div style="display:flex;gap:8px;margin-top:18px;flex-wrap:wrap">
+            <button class="btn btn-primary" data-action="save-conversion">${ICONS.check}<span>保存转换设置</span></button>
+            <button class="btn btn-ghost" data-action="convert-preview">检测待转换</button>
+            <button class="btn btn-ghost" data-action="convert-now">立即转换</button>
+          </div>
+          <p class="modal-note" style="margin-top:12px">FLAC/WAV 为无损；MP3/M4A/OGG/Opus 会重新编码。转换后标签、歌词、封面会复制到新文件。自动转换需开启「替换原文件」；关闭时请手动点「立即转换」输出到转换输出文件夹。</p>
+        </section>
+
+        <section class="card card-pad">
+          <div class="card-head"><div><div class="card-title">转换规则与状态</div><div class="card-sub">按来源格式决定目标格式</div></div></div>
+          <div id="convRules" class="conv-rules">
+            ${ruleRows.map((rule) => `<div class="conv-rule" data-conv-rule>
+              <select class="select conv-from">${convOptions(rule.from || 'wav', ['flac','mp3','m4a','ogg','opus','wav','aiff','ape','wv'])}</select>
+              <span class="conv-arrow">→</span>
+              <select class="select conv-to">${convOptions(rule.to || 'flac', convFormats)}</select>
+              <button class="icon-btn" data-action="remove-conv-rule" title="删除规则">×</button>
+            </div>`).join('')}
+          </div>
+          <button class="btn btn-ghost btn-sm" data-action="add-conv-rule" style="margin-top:10px">＋ 添加规则</button>
+          <div class="auto-status-list" style="margin-top:16px">
+            <div class="auto-status-row"><span class="k">上次转换</span><span class="v ${c.last_run_at ? '' : 'dim'}">${c.last_run_at ? relativeTime(c.last_run_at) : '尚未运行'}</span></div>
+            <div class="auto-status-row"><span class="k">上次结果</span><span class="v ${c.last_result ? '' : 'dim'}">${c.last_result ? esc(c.last_result) : '—'}</span></div>
+            <div class="auto-status-row"><span class="k">待转换</span><span class="v" id="convPreview">点「检测待转换」</span></div>
+          </div>
+          <p class="modal-note" style="margin-top:12px">规则模式只转换命中的来源格式；保持原格式模式不会做任何转换。</p>
+        </section>
       </div>
     </div>`;
 }
@@ -3080,6 +3197,25 @@ async function handleAction(action, el, event) {
         force: scope === 'bad_lyrics' || scope === 'all' || ($('#repairForce') ? $('#repairForce').checked : false),
         dryRun: $('#repairDry') ? $('#repairDry').checked : false,
       });
+      break;
+    }
+    case 'save-conversion':
+      try { await saveConversion(); } catch (err) { toast(err.message, 'err'); }
+      break;
+    case 'convert-preview':
+      await previewConversion();
+      break;
+    case 'convert-now':
+      await runConversion();
+      break;
+    case 'add-conv-rule': {
+      const box = $('#convRules');
+      if (box) box.insertAdjacentHTML('beforeend', conversionRuleHtml('wav', 'flac'));
+      break;
+    }
+    case 'remove-conv-rule': {
+      const row = el.closest('[data-conv-rule]');
+      if (row) row.remove();
       break;
     }
     case 'save-automation': {

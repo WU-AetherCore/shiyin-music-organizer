@@ -165,6 +165,7 @@ def _overview_payload() -> Dict[str, Any]:
         "activity": db.recent_activity(8, paths),
         "providers": provider_catalog(),
         "playback": cfg.get("playback") or {"quality": "original"},
+        "conversion": cfg.get("conversion") or {},
         "navidrome": {
             "enabled": bool(cfg.get("navidrome.enabled")),
             "url": cfg.get("navidrome.url") or "",
@@ -796,7 +797,7 @@ def put_settings():
     data = _body()
     cfg = _cfg()
     patch = data.get("config") if isinstance(data.get("config"), dict) else data
-    allowed = {"library", "repair", "providers", "playback", "automation", "navidrome", "jellyfin", "ui"}
+    allowed = {"library", "repair", "providers", "playback", "conversion", "automation", "navidrome", "jellyfin", "ui"}
     clean: Dict[str, Any] = {}
     for key in allowed:
         if isinstance(patch.get(key), dict):
@@ -867,6 +868,45 @@ def _record_integration_status(prefix: str, ok: bool, message: str) -> Dict[str,
     cfg.set(f"{prefix}.last_sync_message", str(message or "")[:300])
     cfg.save()
     return {"at": at, "ok": bool(ok), "message": str(message or "")[:300]}
+
+
+@bp.get("/convert/preview")
+def convert_preview():
+    from .. import conversion
+
+    items = conversion.candidates(_cfg(), _paths(), limit=200)
+    return jsonify(
+        {
+            "ok": True,
+            "count": len(items),
+            "items": [
+                {
+                    "id": item.get("id"),
+                    "title": item.get("title"),
+                    "artist": item.get("artist"),
+                    "path": item.get("path"),
+                    "target": item.get("conversion_target"),
+                }
+                for item in items[:30]
+            ],
+        }
+    )
+
+
+@bp.post("/convert/run")
+def convert_run():
+    data = _body()
+    ids = data.get("ids") if isinstance(data.get("ids"), list) else None
+    job_id = jobs.start_convert(
+        _cfg(),
+        _paths(),
+        _manager(),
+        ids=ids,
+        dry_run=bool(data.get("dry_run")),
+        limit=max(0, min(2000, int(data.get("limit") or 0))),
+        source="web",
+    )
+    return jsonify({"ok": True, "job_id": job_id, "count": 0 if job_id is None else None})
 
 
 @bp.post("/navidrome/test")
