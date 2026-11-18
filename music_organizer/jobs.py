@@ -278,6 +278,26 @@ def start_scan(config: Config, paths: Optional[AppPaths] = None, manager: Option
         job.log(job.message)
         config.set("automation.last_scan_at", _now()).save()
         try:
+            org = config.get("organization") or {}
+            if org.get("enabled") and result.new_ids and str(org.get("mode") or "") != "keep":
+                from .filemanager import FileManager
+
+                outcome = FileManager(config, paths).auto_organize_ids(
+                    result.new_ids,
+                    mode=str(org.get("mode") or "artist_album"),
+                    base_dir=str(org.get("base_dir") or "其他"),
+                    file_template=str(org.get("file_template") or "{artist} - {title}"),
+                    keep_artists=str(org.get("keep_artists") or ""),
+                )
+                config.set("organization.last_run_at", _now())
+                config.set("organization.last_ok", not outcome.get("errors"))
+                config.set("organization.last_result", f"新歌自动整理：成功 {outcome.get('applied', 0)}，失败 {len(outcome.get('errors') or [])}")
+                config.set("organization.last_count", int(outcome.get("applied", 0)))
+                config.save()
+                job.log(f"新歌自动整理：成功 {outcome.get('applied', 0)} 首")
+        except Exception as exc:
+            job.log(f"新歌自动整理失败：{exc}")
+        try:
             _notify_media_servers(config, paths, manager, job)
         except Exception as exc:
             job.log(f"媒体服务器同步失败：{exc}")
@@ -418,6 +438,12 @@ def start_convert(
         return None
 
     def runner(job: Job) -> Dict[str, Any]:
+        # 新歌导入时会先排队自动修复歌词/封面；转换要等它们写完再复制，
+        # 否则转换后的文件会丢掉刚补的歌词/封面，修复任务也可能找不到原文件。
+        wait_until = time.time() + 300
+        while manager.running("repair") and not job.cancel_event.is_set() and time.time() < wait_until:
+            job.message = "等待歌词/封面修复完成…"
+            time.sleep(0.5)
         job.total = len(pending)
         job.message = "准备转换格式…"
         changed: List[str] = []

@@ -137,6 +137,7 @@ const state = {
     items: [], total: 0, page: 1, page_size: 40, q: '', filter: 'all', sort: 'artist',
     counts: {}, loading: false, error: '', loaded: false, seq: 0,
   },
+  artists: { items: [], loading: false, selected: null, tab: 'songs', album: null },
   selected: new Set(),
   settings: null,
   providersDraft: { lyrics: [], cover: [] },
@@ -326,6 +327,7 @@ function updateShell() {
 const PAGE_META = {
   dashboard: ['概览', '欢迎回来，这里是你的本地曲库'],
   library: ['音乐库', '浏览、播放与批量修复'],
+  artists: ['歌手', '按歌手浏览歌曲与专辑'],
   files: ['文件管理', '浏览、整理与导入当前音乐目录'],
   repair: ['修复中心', '让每一首歌都有正确的歌词与封面'],
   automation: ['自动化', '让整理工作在后台自动完成'],
@@ -355,6 +357,7 @@ async function route() {
   }
   if (r === 'dashboard') renderDashboard();
   else if (r === 'library') { renderLibrary(); loadLibrary(); }
+  else if (r === 'artists') { renderArtists(); loadArtists(); }
   else if (r === 'files') { renderFiles(); loadFiles(); }
   else if (r === 'repair') renderRepair();
   else if (r === 'automation') renderAutomation();
@@ -665,6 +668,108 @@ function skeletonRows(n) {
       <div class="skeleton" style="height:11px;width:40%"></div>
       <div></div><div></div>
     </div>`).join('');
+}
+
+async function loadArtists() {
+  const a = state.artists;
+  a.loading = true;
+  if (state.route === 'artists') renderArtists();
+  try {
+    const data = await api('/api/artists');
+    a.items = data.items || [];
+  } catch (err) {
+    a.items = [];
+    toast(err.message, 'err');
+  } finally {
+    a.loading = false;
+    if (state.route === 'artists') renderArtists();
+  }
+}
+
+async function artistOpen(name) {
+  const a = state.artists;
+  a.loading = true;
+  a.selected = { name };
+  a.album = null;
+  a.tab = 'songs';
+  if (state.route === 'artists') renderArtists();
+  try {
+    a.selected = (await api('/api/artist?name=' + encodeURIComponent(name))).artist;
+  } catch (err) {
+    toast(err.message, 'err');
+    a.selected = null;
+  } finally {
+    a.loading = false;
+    if (state.route === 'artists') renderArtists();
+  }
+}
+
+function artistSongRows(tracks) {
+  return (tracks || []).map((t, index) => `
+    <div class="artist-song-row" data-action="play" data-id="${t.id}">
+      <span class="idx">${String(index + 1).padStart(2, '0')}</span>
+      <img class="artist-song-cover" src="${esc(t.cover_url)}" alt="">
+      <div class="artist-song-main"><b>${esc(t.title)}</b><span>${esc(t.album_display || t.album || '')}</span></div>
+      <span class="artist-song-dur">${esc(t.duration_text || '')}</span>
+      <button class="icon-btn" data-action="open-track" data-id="${t.id}" title="详情">···</button>
+    </div>`).join('');
+}
+
+function renderArtists() {
+  const a = state.artists;
+  if (a.selected) {
+    const artist = a.selected;
+    const album = a.album;
+    const tabs = `<div class="artist-tabs">
+      <button class="artist-tab ${a.tab === 'songs' ? 'active' : ''}" data-action="artist-tab" data-tab="songs">歌曲 <em>${artist.track_count || 0}</em></button>
+      <button class="artist-tab ${a.tab === 'albums' ? 'active' : ''}" data-action="artist-tab" data-tab="albums">专辑 <em>${artist.album_count || 0}</em></button>
+    </div>`;
+    let body = '';
+    if (album) {
+      body = `<div class="artist-subhead"><button class="icon-btn" data-action="artist-album-back">←</button><div><div class="artist-subtitle">${esc(artist.name)}</div><div class="artist-title-sm">${esc(album.name)}</div></div><span>${album.track_count || 0} 首</span></div>
+        <div class="artist-song-list">${artistSongRows(album.tracks)}</div>`;
+    } else if (a.tab === 'albums') {
+      body = `<div class="artist-album-grid">${(artist.albums || []).map((item) => `
+        <button class="artist-album-card" data-action="artist-album" data-album="${esc(item.name)}">
+          <img src="${esc(item.cover_url)}" alt="">
+          <b>${esc(item.name)}</b><span>${item.track_count || 0} 首${item.year ? ' · ' + esc(item.year) : ''}</span>
+        </button>`).join('')}</div>`;
+    } else {
+      body = `<div class="artist-song-list">${artistSongRows(artist.tracks)}</div>`;
+    }
+    $('#view').innerHTML = `
+      <div class="artist-page">
+        <div class="artist-hero">
+          <div class="artist-hero-bg" style="background-image:url('${esc(artist.cover_url)}')"></div>
+          <div class="artist-hero-glow"></div>
+          <div class="artist-hero-inner">
+            <button class="artist-back" data-action="artist-back">← 返回歌手</button>
+            <div class="artist-hero-main">
+              <div class="artist-avatar"><img src="${esc(artist.cover_url)}" alt=""></div>
+              <div class="artist-hero-copy">
+                <div class="artist-kicker">ARTIST</div>
+                <h1>${esc(artist.name)}</h1>
+                <div class="artist-meta">${artist.track_count || 0} 首歌曲 · ${artist.album_count || 0} 张专辑</div>
+              </div>
+            </div>
+          </div>
+        </div>
+        ${tabs}
+        ${body}
+      </div>`;
+    return;
+  }
+  const cards = (a.items || []).map((artist) => `
+    <button class="artist-card" data-action="artist-open" data-name="${esc(artist.name)}">
+      <div class="artist-card-img"><img src="${esc(artist.cover_url)}" alt=""><span class="artist-card-ring"></span></div>
+      <b>${esc(artist.name)}</b>
+      <span>${artist.track_count || 0} 首 · ${artist.album_count || 0} 张专辑</span>
+    </button>`).join('');
+  $('#view').innerHTML = `
+    <div class="artists-page">
+      <div class="artists-head"><div><div class="artist-kicker">ARTISTS</div><h1>歌手</h1><p>${(a.items || []).length} 位歌手 · 按歌曲数量排序</p></div></div>
+      <div class="artist-grid">${cards || `<div class="empty-note">${a.loading ? '正在加载歌手…' : '还没有歌手'}</div>`}</div>
+    </div>`;
 }
 
 function renderLibrary() {
@@ -1218,8 +1323,25 @@ function fileOrganizePreviewHtml(data, kind) {
 
 function fileOrganizeModal() {
   openModal(`
-    <div class="modal-head"><div><div class="modal-title">一键整理</div><div class="modal-sub">按标签把歌曲移动到规范的歌手/专辑目录</div></div><button class="icon-btn modal-close" data-action="modal-cancel">${ICONS.close}</button></div>
+    <div class="modal-head"><div><div class="modal-title">一键整理</div><div class="modal-sub">可选择范围、目标根目录、歌手/专辑层级和文件名</div></div><button class="icon-btn modal-close" data-action="modal-cancel">${ICONS.close}</button></div>
     <div class="modal-body">
+      <div class="form-inline">
+        <label class="field"><span>整理范围</span>
+          <select class="select" id="organizeScope">
+            <option value="all">整个音乐库</option>
+            <option value="folder">指定的当前文件夹</option>
+            <option value="artist">指定的歌手</option>
+          </select>
+        </label>
+        <label class="field"><span>目标根目录</span>
+          <select class="select" id="organizeBaseDir">
+            <option value="">音乐库根目录</option>
+            <option value="其他">放入「其他」里面</option>
+          </select>
+        </label>
+      </div>
+      <div class="form-row" id="organizeScopeFolderWrap" style="display:none"><div class="form-label">要整理的文件夹 <span class="hint">相对音乐库</span></div><input class="input" id="organizeScopeFolder" value="${esc(state.files.path || '')}" placeholder="例如：其他"></div>
+      <div class="form-row" id="organizeScopeArtistWrap" style="display:none"><div class="form-label">要整理的歌手</div><input class="input" id="organizeScopeArtist" placeholder="例如：周杰伦"></div>
       <div class="form-row"><div class="form-label">目录结构</div>
         <select class="select" id="organizeMode">
           <option value="keep" selected>保持当前目录结构（只改文件名）</option>
@@ -1244,7 +1366,7 @@ function fileOrganizeModal() {
       </div>
       <div class="form-row" id="organizeFileWrap" style="display:none"><div class="form-label">文件名模板</div><input class="input" id="organizeFileTemplate" value="{artist} - {title}"></div>
       <div class="form-row"><div class="form-label">保持不动的歌手 <span class="hint">可选，逗号分隔</span></div><input class="input" id="organizeKeepArtists" placeholder="例如：周杰伦, 陈奕迅"></div>
-      <p class="file-modal-note">可用变量：{artist} {album} {title} {track} {year} {genre}。预览确认后才会移动；同名文件会自动加序号。</p>
+      <p class="file-modal-note">可用变量：{artist} {album} {title} {track} {year} {genre}。预览确认后才会移动；同名文件会自动加序号。只整理「其他」时可把范围设为当前文件夹、目标根目录设为「其他」。</p>
       <div id="organizePreview"></div>
     </div>
     <div class="modal-foot"><div class="spacer"></div><button class="btn btn-ghost" data-action="modal-cancel">取消</button><button class="btn btn-soft" data-action="file-organize-preview">预览</button><button class="btn btn-primary" data-action="file-organize-apply" id="organizeApply" disabled>开始整理</button></div>`, { wide: true });
@@ -1286,7 +1408,16 @@ async function fileOrganizePreview() {
   try {
     const data = await api('/api/files/organize/preview', {
       method: 'POST',
-      body: { mode, dir_template: $('#organizeDirTemplate')?.value || '', file_template: fileTemplate, keep_artists: $('#organizeKeepArtists')?.value || '' },
+      body: {
+        mode,
+        dir_template: $('#organizeDirTemplate')?.value || '',
+        file_template: fileTemplate,
+        keep_artists: $('#organizeKeepArtists')?.value || '',
+        scope: $('#organizeScope')?.value || 'all',
+        scope_path: $('#organizeScopeFolder')?.value || '',
+        scope_artist: $('#organizeScopeArtist')?.value || '',
+        base_dir: $('#organizeBaseDir')?.value || '',
+      },
     });
     state.files.plan = data.plan_id;
     $('#organizePreview').innerHTML = fileOrganizePreviewHtml(data, 'organize');
@@ -1515,10 +1646,24 @@ async function runConversion() {
   }
 }
 
+async function saveOrganization() {
+  const org = {
+    enabled: Boolean($('#orgEnabled') && $('#orgEnabled').checked),
+    mode: ($('#orgMode') || {}).value || 'artist_album',
+    base_dir: ($('#orgBaseDir') || {}).value || '',
+    file_template: ($('#orgFileTemplate') || {}).value || '{artist} - {title}',
+    keep_artists: ($('#orgKeepArtists') || {}).value || '',
+  };
+  const data = await api('/api/settings', { method: 'PUT', body: { config: { organization: org } } });
+  if (state.overview) state.overview.organization = data.config.organization;
+  toast('自动整理设置已保存');
+}
+
 function renderAutomation() {
   const o = state.overview;
   const a = o.automation || {};
   const c = o.conversion || {};
+  const org = o.organization || {};
   const status = a.status || {};
   const days = [1, 2, 3, 4, 5, 6, 7];
   const dayNames = ['一', '二', '三', '四', '五', '六', '日'];
@@ -1635,6 +1780,48 @@ function renderAutomation() {
             <div class="auto-status-row"><span class="k">待转换</span><span class="v" id="convPreview">点「检测待转换」</span></div>
           </div>
           <p class="modal-note" style="margin-top:12px">规则模式只转换命中的来源格式；保持原格式模式不会做任何转换。</p>
+        </section>
+      </div>
+
+      <div class="auto-grid">
+        <section class="card card-pad">
+          <div class="card-head"><div><div class="card-title">新歌自动建文件夹</div><div class="card-sub">默认关闭；新导入歌曲按歌手/专辑自动归档</div></div>
+            <span class="status-pill ${org.enabled ? '' : 'off'}"><span class="dot"></span>${org.enabled ? '已启用' : '未启用'}</span></div>
+          <div class="switch-list">
+            <div class="switch-row"><div class="switch-copy"><b>启用自动整理</b><span>只在扫描到新歌时整理，不动已有歌曲</span></div><label class="toggle"><input type="checkbox" id="orgEnabled" ${org.enabled ? 'checked' : ''}><span></span></label></div>
+          </div>
+          <div class="form-inline" style="margin-top:16px">
+            <label class="field"><span>目录层级</span>
+              <select class="select" id="orgMode">
+                <option value="artist_album" ${(org.mode || 'artist_album') === 'artist_album' ? 'selected' : ''}>歌手 / 专辑</option>
+                <option value="artist" ${org.mode === 'artist' ? 'selected' : ''}>仅歌手</option>
+                <option value="album" ${org.mode === 'album' ? 'selected' : ''}>仅专辑</option>
+              </select>
+            </label>
+            <label class="field"><span>目标根目录</span>
+              <select class="select" id="orgBaseDir">
+                <option value="" ${org.base_dir === '' ? 'selected' : ''}>音乐库根目录</option>
+                <option value="其他" ${(org.base_dir || '其他') === '其他' ? 'selected' : ''}>放入「其他」里面</option>
+              </select>
+            </label>
+          </div>
+          <div class="form-row" style="margin-top:10px"><div class="form-label">文件名模板</div><input class="input" id="orgFileTemplate" value="${esc(org.file_template || '{artist} - {title}')}"></div>
+          <div class="form-row"><div class="form-label">保持不动的歌手 <span class="hint">逗号分隔</span></div><input class="input" id="orgKeepArtists" value="${esc(org.keep_artists || '')}" placeholder="例如：周杰伦"></div>
+          <div style="display:flex;gap:8px;margin-top:16px"><button class="btn btn-primary" data-action="save-organization">${ICONS.check}<span>保存自动整理</span></button></div>
+        </section>
+
+        <section class="card card-pad">
+          <div class="card-head"><div><div class="card-title">自动整理规则与状态</div><div class="card-sub">新歌扫描后执行一次</div></div></div>
+          <div class="about-rows">
+            <div>示例：新歌 <code>/其他/某首歌.flac</code> → <code>/其他/歌手/专辑/歌手 - 歌名.flac</code></div>
+            <div>侧车歌词、封面会跟随移动；已有歌曲不会被重新整理。</div>
+          </div>
+          <div class="auto-status-list" style="margin-top:16px">
+            <div class="auto-status-row"><span class="k">上次整理</span><span class="v ${org.last_run_at ? '' : 'dim'}">${org.last_run_at ? relativeTime(org.last_run_at) : '尚未运行'}</span></div>
+            <div class="auto-status-row"><span class="k">上次结果</span><span class="v ${org.last_result ? '' : 'dim'}">${org.last_result ? esc(org.last_result) : '—'}</span></div>
+            <div class="auto-status-row"><span class="k">整理数量</span><span class="v">${org.last_count || 0} 首</span></div>
+          </div>
+          <p class="modal-note" style="margin-top:12px">默认关闭。开启后只作用于扫描发现的新歌；想手动处理某一文件夹或歌手，用「文件管理 → 一键整理」。</p>
         </section>
       </div>
     </div>`;
@@ -3011,8 +3198,36 @@ async function handleAction(action, el, event) {
       } catch (err) { toast(err.message, 'err'); }
       break;
     }
+    case 'artist-open':
+      await artistOpen(el.dataset.name || '');
+      break;
+    case 'artist-back':
+      state.artists.selected = null;
+      state.artists.album = null;
+      renderArtists();
+      break;
+    case 'artist-tab':
+      state.artists.tab = el.dataset.tab || 'songs';
+      state.artists.album = null;
+      renderArtists();
+      break;
+    case 'artist-album': {
+      const artist = state.artists.selected || {};
+      const album = (artist.albums || []).find((item) => item.name === el.dataset.album);
+      state.artists.album = album || null;
+      renderArtists();
+      break;
+    }
+    case 'artist-album-back':
+      state.artists.album = null;
+      renderArtists();
+      break;
     case 'play': {
-      if (state.route === 'library') await playTracks(state.library.items, id);
+      if (state.route === 'artists' && state.artists.selected) {
+        const artist = state.artists.selected;
+        const queue = state.artists.album ? state.artists.album.tracks : artist.tracks;
+        if (queue && queue.length) await playTracks(queue, id);
+      } else if (state.route === 'library') await playTracks(state.library.items, id);
       else {
         const track = (state.queue || []).find((t) => t.id === id) || (state.library.items || []).find((t) => t.id === id);
         if (track) await playTracks(state.library.items.length ? state.library.items : [track], id);
@@ -3218,6 +3433,9 @@ async function handleAction(action, el, event) {
       if (row) row.remove();
       break;
     }
+    case 'save-organization':
+      try { await saveOrganization(); } catch (err) { toast(err.message, 'err'); }
+      break;
     case 'save-automation': {
       const days = $$('#autoDays .day-chip.active').map((el) => Number(el.dataset.day));
       const auto = {
@@ -3581,6 +3799,13 @@ function bindEvents() {
     if (target.id === 'fileSort') {
       state.files.sort = target.value;
       loadFiles();
+      return;
+    }
+    if (target.id === 'organizeScope') {
+      const folder = $('#organizeScopeFolderWrap');
+      const artist = $('#organizeScopeArtistWrap');
+      if (folder) folder.style.display = target.value === 'folder' ? '' : 'none';
+      if (artist) artist.style.display = target.value === 'artist' ? '' : 'none';
       return;
     }
     if (target.id === 'organizeMode') {

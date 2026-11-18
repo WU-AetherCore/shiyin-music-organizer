@@ -117,6 +117,27 @@ def test_organize_keep_structure_is_default(env):
     assert preview["skipped"] >= 1
 
 
+def test_organize_scope_artist_and_base(env):
+    fm = _manager(env)
+    preview = fm.preview_organize("artist_album", scope="artist", scope_artist="周杰伦", base_dir="其他")
+    assert preview["planned"] >= 1
+    for item in preview["items"]:
+        if item["status"] == "planned":
+            assert item["target"].startswith("其他/周杰伦/")
+
+
+def test_auto_organize_ids(env):
+    from music_organizer import db
+
+    fm = _manager(env)
+    track = next(t for t in db.all_tracks(env["paths"]) if t.get("artist") and t.get("album"))
+    result = fm.auto_organize_ids([int(track["id"])], base_dir="其他")
+    assert result["applied"] == 1
+    target = result["preview"]["items"][0]["target"]
+    assert target.startswith("其他/")
+    assert (env["music"] / target).is_file()
+
+
 def test_export_original_copy(env):
     fm = _manager(env)
     source = next(env["music"].glob("*.flac"))

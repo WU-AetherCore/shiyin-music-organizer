@@ -166,6 +166,7 @@ def _overview_payload() -> Dict[str, Any]:
         "providers": provider_catalog(),
         "playback": cfg.get("playback") or {"quality": "original"},
         "conversion": cfg.get("conversion") or {},
+        "organization": cfg.get("organization") or {},
         "navidrome": {
             "enabled": bool(cfg.get("navidrome.enabled")),
             "url": cfg.get("navidrome.url") or "",
@@ -324,6 +325,93 @@ def _duplicate_ids() -> List[int]:
     for group in groups:
         ids.extend(int(track["id"]) for track in group["tracks"])
     return ids
+
+
+@bp.get("/artists")
+def list_artists():
+    query = request.args.get("q", "").strip().casefold()
+    tracks = db.all_tracks(_paths())
+    groups: Dict[str, Dict[str, Any]] = {}
+    for track in tracks:
+        name = str(track.get("artist") or "未知歌手").strip() or "未知歌手"
+        if query and query not in name.casefold():
+            continue
+        item = groups.get(name)
+        if item is None:
+            data = track_json(track)
+            item = {
+                "name": name,
+                "cover_url": data.get("cover_url") or "",
+                "track_count": 0,
+                "album_count": 0,
+                "duration": 0,
+                "albums": {},
+            }
+            groups[name] = item
+        item["track_count"] += 1
+        item["duration"] += float(track.get("duration") or 0)
+        album_name = str(track.get("album") or "未知专辑").strip() or "未知专辑"
+        album = item["albums"].get(album_name)
+        if album is None:
+            album = {
+                "name": album_name,
+                "year": track.get("year") or "",
+                "cover_url": track_json(track).get("cover_url") or "",
+                "track_count": 0,
+            }
+            item["albums"][album_name] = album
+        album["track_count"] += 1
+    items = []
+    for item in groups.values():
+        albums = sorted(item.pop("albums").values(), key=lambda album: (str(album.get("year") or ""), album["name"]))
+        item["album_count"] = len(albums)
+        item["albums"] = albums
+        item["duration_text"] = format_duration(item.pop("duration", 0))
+        items.append(item)
+    items.sort(key=lambda item: (-item["track_count"], item["name"]))
+    return jsonify({"ok": True, "items": items, "total": len(items)})
+
+
+@bp.get("/artist")
+def artist_detail():
+    name = request.args.get("name", "").strip()
+    if not name:
+        raise ApiError("缺少歌手名")
+    tracks = [t for t in db.all_tracks(_paths()) if (t.get("artist") or "未知歌手").strip() == name]
+    if not tracks:
+        return jsonify({"ok": False, "error": "找不到这个歌手"}), 404
+    data = track_json(tracks[0])
+    albums: Dict[str, Dict[str, Any]] = {}
+    songs = []
+    for track in tracks:
+        song = track_json(track)
+        songs.append(song)
+        album_name = str(track.get("album") or "未知专辑").strip() or "未知专辑"
+        album = albums.get(album_name)
+        if album is None:
+            album = {
+                "name": album_name,
+                "year": track.get("year") or "",
+                "cover_url": song.get("cover_url") or "",
+                "track_count": 0,
+                "tracks": [],
+            }
+            albums[album_name] = album
+        album["track_count"] += 1
+        album["tracks"].append(song)
+    return jsonify(
+        {
+            "ok": True,
+            "artist": {
+                "name": name,
+                "cover_url": data.get("cover_url") or "",
+                "track_count": len(tracks),
+                "album_count": len(albums),
+                "tracks": songs,
+                "albums": sorted(albums.values(), key=lambda album: (str(album.get("year") or ""), album["name"])),
+            },
+        }
+    )
 
 
 @bp.get("/tracks")
@@ -797,7 +885,7 @@ def put_settings():
     data = _body()
     cfg = _cfg()
     patch = data.get("config") if isinstance(data.get("config"), dict) else data
-    allowed = {"library", "repair", "providers", "playback", "conversion", "automation", "navidrome", "jellyfin", "ui"}
+    allowed = {"library", "repair", "providers", "playback", "conversion", "organization", "automation", "navidrome", "jellyfin", "ui"}
     clean: Dict[str, Any] = {}
     for key in allowed:
         if isinstance(patch.get(key), dict):

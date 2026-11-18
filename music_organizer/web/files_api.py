@@ -180,6 +180,7 @@ def export_audio():
 def organize_preview():
     try:
         data = _json_body()
+        ids_arg = [int(item) for item in data.get("ids") or [] if str(item).isdigit()]
         return jsonify(
             {
                 "ok": True,
@@ -188,6 +189,11 @@ def organize_preview():
                     str(data.get("dir_template") or ""),
                     str(data.get("file_template") or ""),
                     str(data.get("keep_artists") or ""),
+                    str(data.get("scope") or "all"),
+                    str(data.get("scope_path") or ""),
+                    str(data.get("scope_artist") or ""),
+                    str(data.get("base_dir") or ""),
+                    ids_arg or None,
                 ),
             }
         )

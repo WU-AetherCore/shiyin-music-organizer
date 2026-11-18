@@ -72,6 +72,13 @@
     "replace_original": false,
     "keep_backup": true
   },
+  "organization": {
+    "enabled": false,
+    "mode": "artist_album",
+    "base_dir": "其他",
+    "file_template": "{artist} - {title}",
+    "keep_artists": ""
+  },
   "playback": {
     "quality": "original"
   },

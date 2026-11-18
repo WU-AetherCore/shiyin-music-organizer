@@ -755,9 +755,21 @@ class FileManager:
             result += ("/" if result else "") + part
         return result or fallback
 
-    def _plan_audio(self, target_builder, keep_artists: Optional[Sequence[str]] = None) -> Dict[str, Any]:
+    def _plan_audio(
+        self,
+        target_builder,
+        keep_artists: Optional[Sequence[str]] = None,
+        scope: str = "all",
+        scope_path: str = "",
+        scope_artist: str = "",
+        ids: Optional[Sequence[int]] = None,
+    ) -> Dict[str, Any]:
         root = self._root()
         keep = {str(item or "").strip().casefold() for item in (keep_artists or []) if str(item or "").strip()}
+        wanted_ids = {int(item) for item in (ids or [])}
+        scope_dir = None
+        if scope == "folder" and scope_path:
+            scope_dir = self._resolve(scope_path)
         files = [Path(p) for p in scanner.collect_audio_files(self.config)]
         try:
             tracks = {str(item.get("path")): item for item in db.all_tracks(self.paths)}
@@ -772,12 +784,21 @@ class FileManager:
             except (OSError, ValueError):
                 continue
             meta = tracks.get(str(source))
+            if ids is not None and (not meta or int(meta.get("id") or 0) not in wanted_ids):
+                continue
+            if scope_dir is not None:
+                try:
+                    source.relative_to(scope_dir.resolve())
+                except ValueError:
+                    continue
             if not meta:
                 try:
                     meta = audio.read_meta(source)
                 except Exception:
                     meta = {}
             values = self._values(meta or {}, source)
+            if scope == "artist" and values["artist"].strip().casefold() != scope_artist.strip().casefold():
+                continue
             if keep and values["artist"].strip().casefold() in keep:
                 items.append(
                     {
@@ -844,6 +865,11 @@ class FileManager:
         dir_template: str = "",
         file_template: str = "",
         keep_artists: str = "",
+        scope: str = "all",
+        scope_path: str = "",
+        scope_artist: str = "",
+        base_dir: str = "",
+        ids: Optional[Sequence[int]] = None,
     ) -> Dict[str, Any]:
         with self._lock:
             self._ensure_original()
@@ -878,6 +904,10 @@ class FileManager:
                 folder = dir_template.strip() if mode == "custom" else folder_presets.get(mode, "{artist}/{album}")
                 if not folder:
                     raise FileManagerError("请选择目录结构")
+                base_parts = []
+                for part in str(base_dir or "").replace("\\", "/").split("/"):
+                    if part.strip():
+                        base_parts.append(self._safe_name(part, "未分类"))
 
                 def build(source: Path, values: Dict[str, Any]) -> Path:
                     folder_text = self._render(folder, values, "未分类")
@@ -885,7 +915,7 @@ class FileManager:
                     ext = source.suffix
                     if filename and not name.lower().endswith(ext):
                         name += ext
-                    clean_parts = []
+                    clean_parts = list(base_parts)
                     for part in folder_text.replace("\\", "/").split("/"):
                         part = self._safe_name(part, "未分类")
                         if part:
@@ -896,12 +926,37 @@ class FileManager:
             result = self._plan_audio(
                 build,
                 keep_artists=[item.strip() for item in str(keep_artists or "").replace("，", ",").replace("、", ",").replace(";", ",").replace("；", ",").split(",") if item.strip()],
+                scope=scope,
+                scope_path=scope_path,
+                scope_artist=scope_artist,
+                ids=ids,
             )
             plan = {"type": "organize", "created": time.time(), "mode": mode, "data": result}
             plan_id = uuid.uuid4().hex
             self._save_json(self._plans_dir() / f"{plan_id}.json", plan)
             result["plan_id"] = plan_id
             return result
+
+    def auto_organize_ids(
+        self,
+        ids: Sequence[int],
+        mode: str = "artist_album",
+        base_dir: str = "其他",
+        file_template: str = "{artist} - {title}",
+        keep_artists: str = "",
+    ) -> Dict[str, Any]:
+        preview = self.preview_organize(
+            mode,
+            file_template=file_template,
+            keep_artists=keep_artists,
+            scope="ids",
+            base_dir=base_dir,
+            ids=ids,
+        )
+        if not preview.get("planned"):
+            return {"planned": 0, "applied": 0, "preview": preview}
+        applied = self.apply_plan(str(preview["plan_id"]))
+        return {"planned": preview.get("planned", 0), "applied": applied.get("applied", 0), "preview": preview, **applied}
 
     def preview_rename(self, mode: str, file_template: str = "") -> Dict[str, Any]:
         with self._lock:

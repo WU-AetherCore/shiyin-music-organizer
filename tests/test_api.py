@@ -37,6 +37,19 @@ def test_overview_and_tracks(env):
     assert filtered["total"] == 3
 
 
+def test_artist_endpoints(env):
+    client = env["client"]
+    artists = client.get("/api/artists").get_json()
+    assert artists["ok"] is True
+    assert artists["total"] >= 1
+    artist = artists["items"][0]
+    assert artist["track_count"] >= 1
+    detail = client.get("/api/artist?name=" + artist["name"]).get_json()
+    assert detail["ok"] is True
+    assert detail["artist"]["track_count"] == artist["track_count"]
+    assert detail["artist"]["albums"]
+
+
 def test_track_detail_and_patch(env):
     client = env["client"]
     track = client.get("/api/tracks").get_json()["items"][0]

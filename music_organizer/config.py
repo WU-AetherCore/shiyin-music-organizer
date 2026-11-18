@@ -100,6 +100,17 @@ DEFAULT_CONFIG: Dict[str, Any] = {
         "last_result": "",
         "last_count": 0,
     },
+    "organization": {
+        "enabled": False,
+        "mode": "artist_album",
+        "base_dir": "其他",
+        "file_template": "{artist} - {title}",
+        "keep_artists": "",
+        "last_run_at": "",
+        "last_ok": False,
+        "last_result": "",
+        "last_count": 0,
+    },
     "playback": {
         "quality": "original",
     },
