@@ -17,6 +17,7 @@ from typing import Callable, Dict, Iterable, List, Optional
 from . import audio, db
 from .config import Config
 from .paths import AppPaths, get_paths
+from .textutil import safe_filename
 
 ProgressCallback = Callable[[int, int, str], None]
 
@@ -29,6 +30,7 @@ class ScanResult:
     skipped: int = 0
     removed: int = 0
     errors: int = 0
+    renamed: int = 0
     elapsed: float = 0.0
     new_ids: List[int] = field(default_factory=list)
     changed_ids: List[int] = field(default_factory=list)
@@ -43,6 +45,7 @@ class ScanResult:
             "skipped": self.skipped,
             "removed": self.removed,
             "errors": self.errors,
+            "renamed": self.renamed,
             "elapsed": round(self.elapsed, 2),
             "new_ids": self.new_ids[:500],
             "changed_ids": self.changed_ids[:500],
@@ -60,6 +63,70 @@ def _is_excluded(name: str, patterns: Iterable[str]) -> bool:
         if fnmatch.fnmatch(low, pattern.lower()):
             return True
     return False
+
+
+def _has_surrogate(value: str) -> bool:
+    return any(0xD800 <= ord(ch) <= 0xDFFF for ch in value)
+
+
+def _unique_path(path: Path) -> Path:
+    if not path.exists():
+        return path
+    stem, suffix = path.stem, path.suffix
+    index = 1
+    while True:
+        candidate = path.with_name(f"{stem} ({index}){suffix}")
+        if not candidate.exists():
+            return candidate
+        index += 1
+
+
+def repair_invalid_names(root: Path) -> Dict[str, int]:
+    """把非 UTF-8 ZIP 解压产生的 surrogate 文件名改成合法 UTF-8。
+
+    文件名本身无法还原时用音频标签命名；目录无法还原时改成「未命名文件夹」。
+    只在扫描开始时执行，不改动正常文件名，不删除任何文件。
+    """
+    stats = {"renamed": 0, "errors": 0}
+
+    def visit(folder: Path) -> None:
+        try:
+            entries = list(os.scandir(folder))
+        except OSError:
+            stats["errors"] += 1
+            return
+        for entry in entries:
+            path = Path(entry.path)
+            try:
+                if _has_surrogate(entry.name):
+                    if entry.is_dir():
+                        base = "未命名文件夹"
+                    elif path.suffix.lower() in audio.READABLE_EXTS:
+                        base = "未命名音频"
+                        try:
+                            meta = audio.read_meta(path)
+                            artist = str(meta.get("artist") or "").strip()
+                            title = str(meta.get("title") or "").strip()
+                            if artist and title:
+                                base = f"{artist} - {title}"
+                            elif title:
+                                base = title
+                        except Exception:
+                            pass
+                    else:
+                        base = "未命名"
+                    target = _unique_path(folder / f"{safe_filename(base)}{path.suffix.lower()}")
+                    if target != path:
+                        os.rename(path, target)
+                        stats["renamed"] += 1
+                        path = target
+                if path.is_dir() and not path.is_symlink():
+                    visit(path)
+            except OSError:
+                stats["errors"] += 1
+
+    visit(root)
+    return stats
 
 
 def collect_audio_files(config: Config) -> List[Path]:
@@ -138,6 +205,7 @@ def scan_library(
     if not root or not root.is_dir():
         raise FileNotFoundError(f"音乐文件夹不存在：{root}")
 
+    result.renamed = int(repair_invalid_names(root).get("renamed") or 0)
     files = collect_audio_files(config)
     result.total = len(files)
 
