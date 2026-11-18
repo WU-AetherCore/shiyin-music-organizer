@@ -15,6 +15,8 @@ from .paths import AppPaths, get_paths
 
 TARGET_FORMATS = ("flac", "mp3", "m4a", "ogg", "opus", "wav")
 SOURCE_FORMATS = ("flac", "mp3", "m4a", "mp4", "ogg", "opus", "wav", "aiff", "aif", "ape", "wv")
+LOSSY_FORMATS = {"mp3", "m4a", "mp4", "ogg", "opus", "aac"}
+LOSSLESS_SOURCES = {"flac", "wav", "aiff", "aif", "ape", "wv"}
 CODECS = {
     "flac": ["-c:a", "flac"],
     "mp3": ["-c:a", "libmp3lame", "-b:a", "320k"],
@@ -53,7 +55,16 @@ def target_for(track: Dict[str, Any], config: Config) -> Optional[str]:
         return None
     if mode == "all":
         target = str(config.get("conversion.target") or "flac").lower()
-        return target if target in TARGET_FORMATS and source != target else None
+        if target not in TARGET_FORMATS or source == target:
+            return None
+        # 有损源转 FLAC/WAV 不会提升音质；默认只处理无损源，避免误导。
+        if (
+            config.get("conversion.lossless_only", True)
+            and target in ("flac", "wav")
+            and source in LOSSY_FORMATS
+        ):
+            return None
+        return target
     if mode == "rules":
         for rule in normalize_rules(config):
             if rule["from"] == source:

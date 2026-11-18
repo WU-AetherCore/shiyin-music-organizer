@@ -95,6 +95,7 @@ DEFAULT_CONFIG: Dict[str, Any] = {
         "rules": [{"from": "wav", "to": "flac"}],
         "replace_original": False,
         "keep_backup": True,
+        "lossless_only": True,
         "last_run_at": "",
         "last_ok": False,
         "last_result": "",

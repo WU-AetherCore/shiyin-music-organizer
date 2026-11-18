@@ -1645,6 +1645,7 @@ function collectConversion() {
     rules,
     replace_original: Boolean($('#convReplace') && $('#convReplace').checked),
     keep_backup: Boolean($('#convBackup') && $('#convBackup').checked),
+    lossless_only: Boolean($('#convLosslessOnly') && $('#convLosslessOnly').checked),
   };
 }
 
@@ -1806,6 +1807,7 @@ function renderAutomation() {
             <div class="switch-row"><div class="switch-copy"><b>启用自动转换</b><span>扫描到符合规则的文件后自动排队转换</span></div><label class="toggle"><input type="checkbox" id="convEnabled" ${c.enabled ? 'checked' : ''}><span></span></label></div>
             <div class="switch-row"><div class="switch-copy"><b>替换原文件</b><span>关闭时输出到「转换输出」文件夹，不修改原文件</span></div><label class="toggle"><input type="checkbox" id="convReplace" ${c.replace_original ? 'checked' : ''}><span></span></label></div>
             <div class="switch-row"><div class="switch-copy"><b>保留备份</b><span>替换原文件前保存标签、歌词、封面快照</span></div><label class="toggle"><input type="checkbox" id="convBackup" ${c.keep_backup !== false ? 'checked' : ''}><span></span></label></div>
+            <div class="switch-row"><div class="switch-copy"><b>无损源优先</b><span>目标为 FLAC/WAV 时，跳过 MP3/M4A/OGG/Opus 等有损源，避免“假无损”</span></div><label class="toggle"><input type="checkbox" id="convLosslessOnly" ${c.lossless_only !== false ? 'checked' : ''}><span></span></label></div>
           </div>
           <div class="form-inline" style="margin-top:16px">
             <label class="field"><span>转换模式</span>
@@ -1822,7 +1824,7 @@ function renderAutomation() {
             <button class="btn btn-ghost" data-action="convert-preview">检测待转换</button>
             <button class="btn btn-ghost" data-action="convert-now">立即转换</button>
           </div>
-          <p class="modal-note" style="margin-top:12px">FLAC/WAV 为无损；MP3/M4A/OGG/Opus 会重新编码。转换后标签、歌词、封面会复制到新文件。自动转换需开启「替换原文件」；关闭时请手动点「立即转换」输出到转换输出文件夹。</p>
+          <p class="modal-note" style="margin-top:12px">FLAC/WAV 为无损；MP3/M4A/OGG/Opus 会重新编码。转换后标签、歌词、封面会复制到新文件。自动转换需开启「替换原文件」；关闭时请手动点「立即转换」输出到转换输出文件夹。「无损源优先」会跳过有损源转 FLAC/WAV，避免假无损。</p>
         </section>
 
         <section class="card card-pad">

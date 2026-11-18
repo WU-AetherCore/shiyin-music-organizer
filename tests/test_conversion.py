@@ -31,3 +31,21 @@ def test_conversion_preserve_does_nothing(env):
     cfg = env["config"]
     cfg.update({"conversion": {"enabled": True, "mode": "preserve", "rules": []}}, save=True)
     assert conversion.candidates(cfg, env["paths"]) == []
+
+
+def test_lossless_guard_skips_mp3_to_flac(env):
+    from music_organizer import db
+
+    cfg = env["config"]
+    cfg.update({
+        "conversion": {
+            "enabled": True,
+            "mode": "all",
+            "target": "flac",
+            "lossless_only": True,
+        }
+    }, save=True)
+    mp3 = next(t for t in db.all_tracks(env["paths"]) if t["ext"] == ".mp3")
+    assert conversion.candidates(cfg, env["paths"], ids=[mp3["id"]]) == []
+    cfg.set("conversion.lossless_only", False)
+    assert conversion.candidates(cfg, env["paths"], ids=[mp3["id"]])

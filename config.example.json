@@ -70,7 +70,8 @@
     "target": "flac",
     "rules": [{ "from": "wav", "to": "flac" }],
     "replace_original": false,
-    "keep_backup": true
+    "keep_backup": true,
+    "lossless_only": true
   },
   "organization": {
     "enabled": false,
