@@ -18,6 +18,7 @@ from typing import Any, Callable, Deque, Dict, List, Optional, Sequence
 
 from . import db, scanner
 from . import conversion
+from . import duplicates as duplicate_service
 from .config import Config
 from .paths import AppPaths, get_paths
 from .repair import RepairService, track_display
@@ -235,7 +236,8 @@ def _auto_fix_new(config: Config, paths: AppPaths, manager: JobManager, new_ids:
     need = [
         track
         for track in tracks
-        if (
+        if not track.get("no_lyrics")
+        and (
             ("lyrics" in targets and not track.get("has_lyrics"))
             or ("cover" in targets and not track.get("has_cover"))
             or ("lyrics" in targets and str(track.get("lyrics_timing_status") or "") in ("broken", "suspect"))
@@ -297,6 +299,18 @@ def start_scan(config: Config, paths: Optional[AppPaths] = None, manager: Option
                 job.log(f"新歌自动整理：成功 {outcome.get('applied', 0)} 首")
         except Exception as exc:
             job.log(f"新歌自动整理失败：{exc}")
+        try:
+            if config.get("duplicates.auto_clean"):
+                outcome = duplicate_service.clean_confident(config, paths, source="duplicates-auto")
+                config.set("duplicates.last_run_at", _now())
+                config.set("duplicates.last_ok", not outcome.get("errors"))
+                config.set("duplicates.last_result", f"自动清理 {len(outcome.get('moved') or [])} 首")
+                config.set("duplicates.last_count", len(outcome.get("moved") or []))
+                config.save()
+                if outcome.get("moved"):
+                    job.log(f"重复清理：{len(outcome['moved'])} 首移入回收站")
+        except Exception as exc:
+            job.log(f"重复清理失败：{exc}")
         try:
             _notify_media_servers(config, paths, manager, job)
         except Exception as exc:

@@ -42,6 +42,7 @@ CREATE TABLE IF NOT EXISTS tracks (
     year TEXT NOT NULL DEFAULT '',
     genre TEXT NOT NULL DEFAULT '',
     has_lyrics INTEGER NOT NULL DEFAULT 0,
+    no_lyrics INTEGER NOT NULL DEFAULT 0,
     lyrics_source TEXT NOT NULL DEFAULT '',
     lyrics_synced INTEGER NOT NULL DEFAULT 0,
     lyrics_len INTEGER NOT NULL DEFAULT 0,
@@ -144,6 +145,7 @@ def _ensure_columns(conn: sqlite3.Connection) -> None:
         "favorite": "INTEGER NOT NULL DEFAULT 0",
         "lyrics_timing_status": "TEXT NOT NULL DEFAULT ''",
         "lyrics_timing_issues": "TEXT NOT NULL DEFAULT '[]'",
+        "no_lyrics": "INTEGER NOT NULL DEFAULT 0",
     }
     for name, ddl in additions.items():
         if name not in existing:
@@ -175,11 +177,12 @@ def _health_of(meta: Dict[str, Any]) -> str:
     if not meta.get("audio_ok", True):
         return "error"
     has_lyrics = bool(meta.get("has_lyrics"))
+    no_lyrics = bool(meta.get("no_lyrics"))
     has_cover = bool(meta.get("has_cover"))
     issues = meta.get("tag_issues") or []
-    if not has_lyrics and not has_cover:
+    if not no_lyrics and not has_lyrics and not has_cover:
         return "missing_both"
-    if not has_lyrics:
+    if not no_lyrics and not has_lyrics:
         return "missing_lyrics"
     if not has_cover:
         return "missing_cover"
@@ -273,14 +276,17 @@ def upsert_track(meta: Dict[str, Any], paths: Optional[AppPaths] = None) -> int:
             {
                 "audio_ok": meta.get("audio_ok", True),
                 "has_lyrics": meta.get("has_lyrics"),
+                "no_lyrics": meta.get("no_lyrics"),
                 "has_cover": meta.get("has_cover"),
                 "tag_issues": meta.get("tag_issues") or [],
             }
         ),
     }
     with get_conn(paths) as conn:
-        existing = conn.execute("SELECT id, added_at FROM tracks WHERE path=?", (values["path"],)).fetchone()
+        existing = conn.execute("SELECT id, added_at, no_lyrics FROM tracks WHERE path=?", (values["path"],)).fetchone()
         if existing:
+            if existing["no_lyrics"]:
+                values["health"] = "ok" if values["has_cover"] else "missing_cover"
             assignments = ", ".join(f"{col}=?" for col in _TRACK_COLUMNS if col != "path")
             params = [values[col] for col in _TRACK_COLUMNS if col != "path"]
             conn.execute(
@@ -420,10 +426,10 @@ def tracks_by_ids(ids: Sequence[int], paths: Optional[AppPaths] = None) -> List[
 
 _FILTER_SQL = {
     "all": "1=1",
-    "missing_any": "(has_cover=0 OR has_lyrics=0)",
+    "missing_any": "(has_cover=0 OR (has_lyrics=0 AND no_lyrics=0))",
     "missing_cover": "has_cover=0",
-    "missing_lyrics": "has_lyrics=0",
-    "missing_both": "has_cover=0 AND has_lyrics=0",
+    "missing_lyrics": "has_lyrics=0 AND no_lyrics=0",
+    "missing_both": "has_cover=0 AND has_lyrics=0 AND no_lyrics=0",
     "issues": "tag_issues NOT IN ('[]', '')",
     "error": "health='error'",
     "ok": "health='ok'",
@@ -498,8 +504,8 @@ def stats(paths: Optional[AppPaths] = None) -> Dict[str, Any]:
               COALESCE(SUM(duration), 0) AS duration,
               COALESCE(SUM(size), 0) AS size,
               COALESCE(SUM(CASE WHEN has_cover=0 THEN 1 ELSE 0 END), 0) AS missing_cover,
-              COALESCE(SUM(CASE WHEN has_lyrics=0 THEN 1 ELSE 0 END), 0) AS missing_lyrics,
-              COALESCE(SUM(CASE WHEN has_cover=0 AND has_lyrics=0 THEN 1 ELSE 0 END), 0) AS missing_both,
+              COALESCE(SUM(CASE WHEN has_lyrics=0 AND no_lyrics=0 THEN 1 ELSE 0 END), 0) AS missing_lyrics,
+              COALESCE(SUM(CASE WHEN has_cover=0 AND has_lyrics=0 AND no_lyrics=0 THEN 1 ELSE 0 END), 0) AS missing_both,
               COALESCE(SUM(CASE WHEN tag_issues NOT IN ('[]','') THEN 1 ELSE 0 END), 0) AS issues,
               COALESCE(SUM(CASE WHEN health='error' THEN 1 ELSE 0 END), 0) AS errors,
               COALESCE(SUM(CASE WHEN has_lyrics=1 AND lyrics_synced=1 THEN 1 ELSE 0 END), 0) AS synced_lyrics,
@@ -592,6 +598,14 @@ def set_favorite(track_id: int, favorite: bool, paths: Optional[AppPaths] = None
         conn.execute("UPDATE tracks SET favorite=? WHERE id=?", (1 if favorite else 0, track_id))
 
 
+def set_no_lyrics(track_id: int, value: bool, paths: Optional[AppPaths] = None) -> None:
+    with get_conn(paths) as conn:
+        conn.execute(
+            "UPDATE tracks SET no_lyrics=?, health=CASE WHEN ?=1 THEN CASE WHEN has_cover=1 THEN 'ok' ELSE 'missing_cover' END ELSE CASE WHEN has_lyrics=1 THEN 'ok' ELSE 'missing_lyrics' END END WHERE id=?",
+            (1 if value else 0, 1 if value else 0, track_id),
+        )
+
+
 def mark_played(track_id: int, paths: Optional[AppPaths] = None) -> None:
     with get_conn(paths) as conn:
         conn.execute(
@@ -627,7 +641,7 @@ def ids_needing_repair(
     """挑选需要自动修复的歌曲：缺歌词 / 缺封面，且失败次数未超过上限。"""
     clauses = []
     if "lyrics" in targets:
-        clauses.append("has_lyrics=0")
+        clauses.append("has_lyrics=0 AND no_lyrics=0")
     if "cover" in targets:
         clauses.append("has_cover=0")
     if not clauses:
@@ -691,6 +705,18 @@ def find_duplicates(min_duration: float = 20, paths: Optional[AppPaths] = None) 
     tracks = all_tracks(paths)
     groups: List[Dict[str, Any]] = []
     used: set = set()
+    try:
+        ignored = set(json.loads(get_meta("duplicates.ignored", "[]", paths) or "[]"))
+    except Exception:
+        ignored = set()
+
+    def signature(items: Sequence[Dict[str, Any]]) -> str:
+        return "|".join(
+            sorted(
+                f"{normalize_key(item.get('title') or '')}|{normalize_key(item.get('artist') or '')}|{normalize_key(item.get('album') or '')}"
+                for item in items
+            )
+        )
 
     # 1) 文件级完全重复（头尾哈希）
     by_hash: Dict[str, List[Dict[str, Any]]] = {}
@@ -700,45 +726,82 @@ def find_duplicates(min_duration: float = 20, paths: Optional[AppPaths] = None) 
     for digest, items in by_hash.items():
         if len(items) > 1:
             items = sorted(items, key=lambda t: t["size"], reverse=True)
+            sig = f"hash:{digest}"
+            if sig in ignored or signature(items) in ignored:
+                continue
             groups.append(
                 {
                     "key": f"hash:{digest[:10]}",
-                    "reason": "文件内容相同",
+                    "signature": sig,
+                    "confidence": "exact",
+                    "reason": "文件内容完全相同",
                     "keep_id": items[0]["id"],
                     "tracks": items,
                 }
             )
             used.update(item["id"] for item in items)
 
-    # 2) 同曲不同格式 / 不同码率：标题 + 时长接近
-    by_song: Dict[Tuple[str, int], List[Dict[str, Any]]] = {}
+    # 2) 同曲不同格式 / 不同码率：标题 + 歌手 + 时长接近。
+    # 只按标题会把「龙卷风（邓紫棋）」和「龙卷风（周杰伦）」误判，必须带歌手。
+    by_song: Dict[Tuple[str, str, int], List[Dict[str, Any]]] = {}
     for track in tracks:
         if track["id"] in used:
             continue
         if float(track.get("duration") or 0) < min_duration:
             continue
         title_key = normalize_key(track.get("title") or Path(track["filename"]).stem)
-        if not title_key:
+        artist_key = normalize_key(track.get("artist") or "")
+        if not title_key or not artist_key:
             continue
-        bucket = int(round(float(track.get("duration") or 0) / 3.0))
-        by_song.setdefault((title_key, bucket), []).append(track)
+        bucket = int(round(float(track.get("duration") or 0) / 2.0))
+        by_song.setdefault((title_key, artist_key, bucket), []).append(track)
 
-    for (_title, _bucket), items in by_song.items():
+    for (_title, _artist, _bucket), items in by_song.items():
         if len(items) < 2:
             continue
-        # 时长差 3 秒以内且同名，视为重复
+        album_keys = {normalize_key(item.get("album") or "") for item in items}
+        album_keys.discard("")
+        high_confidence = len(album_keys) == 1 and len(items) > 1
         items = sorted(items, key=lambda t: (t["size"], t["bits"], t["bitrate"]), reverse=True)
+        sig = signature(items)
+        if sig in ignored:
+            continue
         groups.append(
             {
-                "key": f"song:{_title}:{_bucket}",
-                "reason": "同名同曲（不同格式/版本）",
+                "key": f"song:{_title}:{_artist}:{_bucket}",
+                "signature": sig,
+                "confidence": "high" if high_confidence else "medium",
+                "reason": "同歌手、同专辑、同名、时长接近" if high_confidence else "同歌手、同名、时长接近（可能是不同专辑/版本）",
                 "keep_id": items[0]["id"],
                 "tracks": items,
             }
         )
 
-    groups.sort(key=lambda g: len(g["tracks"]), reverse=True)
+    groups.sort(
+        key=lambda g: (
+            {"exact": 0, "high": 1, "medium": 2}.get(g.get("confidence", ""), 3),
+            -len(g["tracks"]),
+        )
+    )
     return groups
+
+
+def ignore_duplicate_signature(value: str, paths: Optional[AppPaths] = None) -> None:
+    if not value:
+        return
+    try:
+        values = set(json.loads(get_meta("duplicates.ignored", "[]", paths) or "[]"))
+    except Exception:
+        values = set()
+    values.add(value)
+    set_meta("duplicates.ignored", json.dumps(sorted(values), ensure_ascii=False), paths)
+
+
+def ignored_duplicate_count(paths: Optional[AppPaths] = None) -> int:
+    try:
+        return len(json.loads(get_meta("duplicates.ignored", "[]", paths) or "[]"))
+    except Exception:
+        return 0
 
 
 def import_rows(rows: Iterable[Dict[str, Any]], paths: Optional[AppPaths] = None) -> int:

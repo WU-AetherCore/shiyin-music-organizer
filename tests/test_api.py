@@ -148,6 +148,27 @@ def test_duplicates_endpoint(env):
     assert data["total"] >= 0
 
 
+def test_duplicate_ignore_and_auto_clean(env):
+    import shutil
+    from music_organizer.scanner import scan_library
+
+    music = env["music"]
+    shutil.copy2(music / "晴天 - 周杰伦.flac", music / "晴天副本.flac")
+    scan_library(env["config"], env["paths"])
+    data = env["client"].get("/api/duplicates").get_json()
+    groups = [group for group in data["groups"] if group["confidence"] == "exact"]
+    assert groups
+    track_id = groups[0]["tracks"][0]["id"]
+    ignored = env["client"].post("/api/duplicates/ignore", json={"track_id": track_id})
+    assert ignored.status_code == 200
+    assert env["client"].get("/api/duplicates").get_json()["total"] == 0
+    env["client"].delete("/api/duplicates/ignored")
+    cleaned = env["client"].post("/api/duplicates/auto-clean")
+    assert cleaned.status_code == 200
+    assert cleaned.get_json()["moved"]
+    assert not (music / "晴天副本.flac").exists()
+
+
 def test_repair_batch_dry_run(env, monkeypatch):
     client = env["client"]
 

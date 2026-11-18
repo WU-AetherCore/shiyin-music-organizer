@@ -13,7 +13,7 @@ from typing import Any, Dict, List, Optional
 
 from flask import Blueprint, Response, current_app, jsonify, request, send_file, session, stream_with_context
 
-from .. import __version__, audio, db, jobs
+from .. import __version__, audio, db, duplicates as duplicate_service, jobs
 from ..automation import Automation
 from ..config import Config, hash_password
 from ..logging_setup import get_logger, tail_log
@@ -122,6 +122,7 @@ def track_json(track: Dict[str, Any], base: str = "") -> Dict[str, Any]:
         "channels": track.get("channels") or 0,
         "quality": quality,
         "has_lyrics": bool(track.get("has_lyrics")),
+        "no_lyrics": bool(track.get("no_lyrics")),
         "lyrics_synced": bool(track.get("lyrics_synced")),
         "lyrics_source": track.get("lyrics_source") or "",
         "lyrics_timing_status": track.get("lyrics_timing_status") or "",
@@ -157,6 +158,7 @@ def _overview_payload() -> Dict[str, Any]:
         "stats": stats,
         "filters": {**filters, "duplicates": sum(len(group["tracks"]) for group in duplicates)},
         "duplicate_groups": len(duplicates),
+        "duplicate_ignored": db.ignored_duplicate_count(paths),
         "automation": {
             **(cfg.get("automation") or {}),
             "status": auto.status(),
@@ -167,6 +169,7 @@ def _overview_payload() -> Dict[str, Any]:
         "playback": cfg.get("playback") or {"quality": "original"},
         "conversion": cfg.get("conversion") or {},
         "organization": cfg.get("organization") or {},
+        "duplicates": cfg.get("duplicates") or {},
         "navidrome": {
             "enabled": bool(cfg.get("navidrome.enabled")),
             "url": cfg.get("navidrome.url") or "",
@@ -663,6 +666,16 @@ def candidates(track_id: int):
     return jsonify(payload)
 
 
+@bp.post("/tracks/<int:track_id>/no-lyrics")
+def set_track_no_lyrics(track_id: int):
+    track = _track_or_404(track_id)
+    data = _body()
+    value = bool(data.get("value", True))
+    db.set_no_lyrics(track_id, value, _paths())
+    updated = db.get_track(track_id, _paths()) or track
+    return jsonify({"ok": True, "track": track_json(updated)})
+
+
 @bp.post("/tracks/<int:track_id>/apply")
 def apply_candidate(track_id: int):
     track = _track_or_404(track_id)
@@ -789,12 +802,51 @@ def duplicates():
         data.append(
             {
                 "key": group["key"],
+                "signature": group.get("signature") or "",
+                "confidence": group.get("confidence") or "medium",
                 "reason": group["reason"],
                 "keep_id": group["keep_id"],
                 "tracks": [track_json(track) for track in group["tracks"]],
             }
         )
-    return jsonify({"groups": data, "total": sum(len(item["tracks"]) for item in data)})
+    return jsonify(
+        {
+            "groups": data,
+            "total": sum(len(item["tracks"]) for item in data),
+            "ignored": db.ignored_duplicate_count(_paths()),
+        }
+    )
+
+
+@bp.post("/duplicates/ignore")
+def ignore_duplicates():
+    data = _body()
+    track_id = int(data.get("track_id") or 0)
+    if not track_id:
+        raise ApiError("缺少歌曲 ID")
+    signature = duplicate_service.ignore_for_track(track_id, _paths())
+    if not signature:
+        raise ApiError("没有找到这个重复分组")
+    return jsonify({"ok": True, "signature": signature, "ignored": db.ignored_duplicate_count(_paths())})
+
+
+@bp.delete("/duplicates/ignored")
+def clear_ignored_duplicates():
+    db.set_meta("duplicates.ignored", "[]", _paths())
+    return jsonify({"ok": True, "ignored": 0})
+
+
+@bp.post("/duplicates/auto-clean")
+def auto_clean_duplicates():
+    cfg = _cfg()
+    result = duplicate_service.clean_confident(cfg, _paths(), source="duplicates-auto")
+    now = datetime.now().isoformat(timespec="seconds")
+    cfg.set("duplicates.last_run_at", now)
+    cfg.set("duplicates.last_ok", not result.get("errors"))
+    cfg.set("duplicates.last_result", f"清理 {len(result.get('moved') or [])} 首，保留每组最佳音质")
+    cfg.set("duplicates.last_count", len(result.get("moved") or []))
+    cfg.save()
+    return jsonify({"ok": True, **result, "config": cfg.get("duplicates") or {}})
 
 
 @bp.post("/duplicates/trash")
@@ -885,7 +937,7 @@ def put_settings():
     data = _body()
     cfg = _cfg()
     patch = data.get("config") if isinstance(data.get("config"), dict) else data
-    allowed = {"library", "repair", "providers", "playback", "conversion", "organization", "automation", "navidrome", "jellyfin", "ui"}
+    allowed = {"library", "repair", "providers", "playback", "conversion", "organization", "duplicates", "automation", "navidrome", "jellyfin", "ui"}
     clean: Dict[str, Any] = {}
     for key in allowed:
         if isinstance(patch.get(key), dict):

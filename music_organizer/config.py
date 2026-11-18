@@ -112,6 +112,13 @@ DEFAULT_CONFIG: Dict[str, Any] = {
         "last_result": "",
         "last_count": 0,
     },
+    "duplicates": {
+        "auto_clean": False,
+        "last_run_at": "",
+        "last_ok": False,
+        "last_result": "",
+        "last_count": 0,
+    },
     "playback": {
         "quality": "original",
     },

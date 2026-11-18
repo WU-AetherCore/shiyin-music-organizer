@@ -80,6 +80,9 @@
     "file_template": "{artist} - {title}",
     "keep_artists": ""
   },
+  "duplicates": {
+    "auto_clean": false
+  },
   "playback": {
     "quality": "original"
   },

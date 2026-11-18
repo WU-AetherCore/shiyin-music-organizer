@@ -612,7 +612,9 @@ async function loadLibrary() {
 
 function statusBadges(t) {
   const badges = [];
-  if (t.has_lyrics) {
+  if (t.no_lyrics) {
+    badges.push('<span class="status-mini ok" title="已标记为纯音乐，不需要歌词">纯</span>');
+  } else if (t.has_lyrics) {
     badges.push(`<span class="status-mini ok" title="${t.lyrics_synced ? '逐行歌词已内嵌' : '歌词已内嵌（无时间轴）'}">词</span>`);
   } else {
     badges.push('<span class="status-mini bad" title="缺少歌词">缺词</span>');
@@ -635,6 +637,7 @@ function statusBadges(t) {
 function trackRow(t) {
   const playing = state.current && state.current.id === t.id;
   const checked = state.selected.has(t.id);
+  const duplicateRow = state.library.filter === 'duplicates';
   return `
     <div class="track-row ${playing ? 'playing' : ''}" data-track-id="${t.id}" data-action="open-track" data-id="${t.id}" tabindex="0">
       <div class="track-check"><input type="checkbox" data-select-id="${t.id}" ${checked ? 'checked' : ''} aria-label="选择 ${esc(t.title)}"></div>
@@ -652,6 +655,7 @@ function trackRow(t) {
       <div class="track-format">${esc((t.ext || '').toUpperCase())}${t.bits ? ' · ' + t.bits + 'bit' : ''}</div>
       <div class="track-status">${statusBadges(t)}</div>
       <div class="track-actions">
+        ${duplicateRow ? `<button class="btn btn-ghost btn-xs dup-ignore" data-action="ignore-duplicate" data-id="${t.id}" title="这组不是重复，忽略">不是重复</button>` : ''}
         <button class="icon-btn primary-action" data-action="repair-track" data-id="${t.id}" data-targets="lyrics,cover" title="一键修复">${ICONS.wrench}</button>
         <button class="icon-btn" data-action="candidates" data-id="${t.id}" data-kind="cover" title="更换封面">${ICONS.image}</button>
         <button class="icon-btn" data-action="open-track" data-id="${t.id}" title="详情">${ICONS.more}</button>
@@ -874,6 +878,7 @@ function renderLibrary() {
           <button class="btn btn-ghost btn-sm" data-action="select-all">${selectedCount ? '取消全选' : '全选本页'}</button>
         </div>
       </div>
+      ${l.filter === 'duplicates' ? `<div class="dup-note"><span>按「歌手 + 歌名 + 时长 + 专辑」识别；同一歌名不同歌手不会算重复。若仍误判，点右侧「不是重复」忽略整组。</span><button class="btn btn-ghost btn-xs" data-action="clear-ignored-duplicates">恢复所有忽略（${o.duplicate_ignored || 0}）</button></div>` : ''}
       ${selBar}
       <div class="card track-table">
         <div class="track-head">
@@ -1722,11 +1727,39 @@ function dirOptionsHtml(selected = '', rootLabel = '音乐库根目录') {
   return options.join('');
 }
 
+async function saveDuplicates() {
+  const enabled = Boolean($('#dupAutoClean') && $('#dupAutoClean').checked);
+  const data = await api('/api/settings', { method: 'PUT', body: { config: { duplicates: { auto_clean: enabled } } } });
+  if (state.overview) state.overview.duplicates = data.config.duplicates;
+  toast(enabled ? '已开启自动清理确认重复' : '已关闭自动清理');
+}
+
+async function autoCleanDuplicates() {
+  if (!(await confirmDialog('清理确认重复？', '只会清理高置信重复组，并移入回收站；误判的组请先点「不是重复」。', '开始清理'))) return;
+  try {
+    const data = await api('/api/duplicates/auto-clean', { method: 'POST' });
+    toast(`已清理 ${(data.moved || []).length} 首重复歌曲`);
+    await loadOverview();
+    if (state.route === 'library') loadLibrary();
+    renderAutomation();
+  } catch (err) { toast(err.message, 'err'); }
+}
+
+async function ignoreDuplicate(trackId) {
+  try {
+    await api('/api/duplicates/ignore', { method: 'POST', body: { track_id: trackId } });
+    toast('已忽略这组误判');
+    await loadOverview();
+    loadLibrary();
+  } catch (err) { toast(err.message, 'err'); }
+}
+
 function renderAutomation() {
   const o = state.overview;
   const a = o.automation || {};
   const c = o.conversion || {};
   const org = o.organization || {};
+  const dup = o.duplicates || {};
   const status = a.status || {};
   const days = [1, 2, 3, 4, 5, 6, 7];
   const dayNames = ['一', '二', '三', '四', '五', '六', '日'];
@@ -1883,6 +1916,35 @@ function renderAutomation() {
             <div class="auto-status-row"><span class="k">整理数量</span><span class="v">${org.last_count || 0} 首</span></div>
           </div>
           <p class="modal-note" style="margin-top:12px">默认关闭。开启后只作用于扫描发现的新歌；想手动处理某一文件夹或歌手，用「文件管理 → 一键整理」。</p>
+        </section>
+      </div>
+
+      <div class="auto-grid">
+        <section class="card card-pad">
+          <div class="card-head"><div><div class="card-title">重复歌曲清理</div><div class="card-sub">同名不同歌手不再误判；只清理确认重复</div></div>
+            <span class="status-pill ${dup.auto_clean ? '' : 'off'}"><span class="dot"></span>${dup.auto_clean ? '自动清理已开启' : '默认关闭'}</span></div>
+          <div class="switch-list">
+            <div class="switch-row"><div class="switch-copy"><b>扫描后自动清理确认重复</b><span>只处理“内容相同 / 同歌手同专辑同名同时长”的高置信组</span></div><label class="toggle"><input type="checkbox" id="dupAutoClean" ${dup.auto_clean ? 'checked' : ''}><span></span></label></div>
+          </div>
+          <div style="display:flex;gap:8px;margin-top:16px;flex-wrap:wrap">
+            <button class="btn btn-primary" data-action="save-duplicates">${ICONS.check}<span>保存自动清理</span></button>
+            <button class="btn btn-soft" data-action="auto-clean-duplicates">立即清理确认重复</button>
+          </div>
+          <p class="modal-note" style="margin-top:12px">清理会把重复文件移到回收站，不直接删除；每组保留体积/位深/码率最好的一份。误判请到音乐库「重复」筛选里点「不是重复」。</p>
+        </section>
+
+        <section class="card card-pad">
+          <div class="card-head"><div><div class="card-title">重复识别状态</div><div class="card-sub">按歌手 + 歌名 + 时长 + 专辑判断</div></div></div>
+          <div class="auto-status-list">
+            <div class="auto-status-row"><span class="k">当前重复组</span><span class="v">${o.duplicate_groups || 0} 组</span></div>
+            <div class="auto-status-row"><span class="k">涉及歌曲</span><span class="v">${(o.filters && o.filters.duplicates) || 0} 首</span></div>
+            <div class="auto-status-row"><span class="k">已忽略误判</span><span class="v">${o.duplicate_ignored || 0} 组</span></div>
+            <div class="auto-status-row"><span class="k">上次清理</span><span class="v ${dup.last_run_at ? '' : 'dim'}">${dup.last_run_at ? relativeTime(dup.last_run_at) : '尚未运行'}</span></div>
+            <div class="auto-status-row"><span class="k">上次结果</span><span class="v ${dup.last_result ? '' : 'dim'}">${dup.last_result ? esc(dup.last_result) : '—'}</span></div>
+          </div>
+          <div style="display:flex;gap:8px;margin-top:16px;flex-wrap:wrap">
+            <button class="btn btn-ghost btn-sm" data-action="clear-ignored-duplicates">恢复所有忽略</button>
+          </div>
         </section>
       </div>
     </div>`;
@@ -2724,9 +2786,10 @@ async function openTrack(id) {
         </div>
         <div class="td-section">
           <div class="td-section-title">歌词 ${t.lyrics && t.lyrics.source ? '· ' + (t.lyrics.source === 'embed' ? '内嵌标签' : t.lyrics.source === 'lrc' ? '外挂 LRC' : esc(t.lyrics.source)) : ''}</div>
-          <div class="td-lyrics">${lyricsText ? esc(lyricsText.slice(0, 3000)) : '<span class="dim">暂无歌词</span>'}</div>
+          <div class="td-lyrics">${t.no_lyrics ? '<span class="dim">已标记为纯音乐，不需要歌词</span>' : (lyricsText ? esc(lyricsText.slice(0, 3000)) : '<span class="dim">暂无歌词</span>')}</div>
           ${['broken', 'suspect'].includes(t.lyrics_timing_status) ? `<div class="modal-note" style="color:var(--warn);margin-top:8px">时间轴异常：${esc((t.lyrics_timing_issues || []).map((i) => i.label || '').filter(Boolean).join('；') || '歌词与音频时长不匹配')}</div>` : ''}
           <div style="display:flex;gap:8px;margin-top:10px">
+            <button class="btn btn-ghost btn-sm" data-action="toggle-no-lyrics" data-id="${t.id}">${t.no_lyrics ? '恢复需要歌词' : '标记为纯音乐'}</button>
             <button class="btn btn-ghost btn-sm" data-action="edit-lyrics" data-id="${t.id}">编辑歌词</button>
             <button class="btn btn-ghost btn-sm" data-action="repair-track" data-targets="lyrics" data-id="${t.id}">重新匹配时间轴</button>
             <button class="btn btn-ghost btn-sm" data-action="offset-reset" data-id="${t.id}">重置偏移</button>
@@ -3397,6 +3460,17 @@ async function handleAction(action, el, event) {
     case 'repair-track':
       await startSingleRepair(id, (el.dataset.targets || 'lyrics,cover').split(','));
       break;
+    case 'toggle-no-lyrics': {
+      try {
+        const value = !(state.trackDetail && state.trackDetail.no_lyrics);
+        await api(`/api/tracks/${id}/no-lyrics`, { method: 'POST', body: { value } });
+        toast(value ? '已标记为纯音乐' : '已恢复为需要歌词');
+        await loadOverview();
+        await openTrack(id);
+        if (state.route === 'library') loadLibrary();
+      } catch (err) { toast(err.message, 'err'); }
+      break;
+    }
     case 'candidates':
       await openCandidates(el.dataset.kind || 'cover', id);
       break;
@@ -3494,6 +3568,22 @@ async function handleAction(action, el, event) {
       if (row) row.remove();
       break;
     }
+    case 'save-duplicates':
+      try { await saveDuplicates(); } catch (err) { toast(err.message, 'err'); }
+      break;
+    case 'auto-clean-duplicates':
+      await autoCleanDuplicates();
+      break;
+    case 'ignore-duplicate':
+      await ignoreDuplicate(id);
+      break;
+    case 'clear-ignored-duplicates':
+      try {
+        await api('/api/duplicates/ignored', { method: 'DELETE' });
+        toast('已恢复所有忽略');
+        await loadOverview(); loadLibrary();
+      } catch (err) { toast(err.message, 'err'); }
+      break;
     case 'save-organization':
       try { await saveOrganization(); } catch (err) { toast(err.message, 'err'); }
       break;
