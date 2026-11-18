@@ -1,5 +1,28 @@
 # 更新日志
 
+## v1.3.13 · 2026-11-18
+
+- 新增 Navidrome **幽灵记录重映射**：通过官方 `missing fix` 把移动/改标签后留下的 missing 记录映射到同名同歌手的现有文件；匹配会去掉“歌手 - ”前缀、空格和繁简差异；
+- 每次扫描/修复/手动刷新先等待扫描结束，再重映射缺失记录，最后重试 absent 专辑封面；
+- 设置页新增「清理缺失记录」开关（默认开启）；
+- 解决 `YOUTH - Troye Sivan` 一类旧路径导致 `Blue Neighbourhood` 空专辑显示默认蓝色封面的情况。
+
+## v1.3.12 · 2026-11-18
+
+- 「立即扫描」也会调用 Navidrome `artwork reprocess --source absent`，不再只触发媒体库扫描；
+- 自动扫描/修复和手动扫描都走同一套缺失封面重试逻辑。
+
+## v1.3.11 · 2026-11-18
+
+### 修复 Navidrome 部分专辑没有封面
+
+- 根因：Navidrome 全量扫描**不会自动重试已判定为 absent 的专辑封面**，必须执行 `navidrome artwork reprocess`；
+- 每次 Navidrome 扫描/修复同步后，插件会自动通过 `docker exec` 调用
+  `navidrome artwork reprocess --kind al --source absent -y`；
+- 自动发现 `navidrome` 容器，也可用 `navidrome.container` 指定；
+- 设置页新增「刷新缺失封面」开关（默认开启）；
+- 当前 `願い E.P.`、`失眠症候群` 等默认图标专辑已重试成功（返回真实 JPEG，不再是占位图）。
+
 ## v1.3.10 · 2026-11-18
 
 - 扫描完成后自动通知 Jellyfin / Navidrome：新歌生成 `.lrc` 后不需要再手动点刷新；

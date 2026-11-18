@@ -879,9 +879,16 @@ def navidrome_test():
 
 @bp.post("/navidrome/rescan")
 def navidrome_rescan():
-    from ..navidrome import trigger_rescan
+    from ..navidrome import refresh_missing_artwork, remap_missing_files, trigger_rescan
 
     ok, message = trigger_rescan(_cfg(), _paths(), full=True)
+    try:
+        _remap_ok, remap_message = remap_missing_files(_cfg(), _paths())
+        message = f"{message}；{remap_message}"
+        _art_ok, art_message = refresh_missing_artwork(_cfg(), _paths())
+        message = f"{message}；{art_message}"
+    except Exception as exc:
+        message = f"{message}；封面/缺失记录重试失败：{exc}"
     return jsonify({"ok": ok, "message": message, "last_sync": _record_integration_status("navidrome", ok, message)})
 
 

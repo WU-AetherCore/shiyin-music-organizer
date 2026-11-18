@@ -502,7 +502,12 @@ Navidrome 不会自动感知外部写入的标签，需要一次重新扫描。�
   （如 `/home/pi/Music`），只要卷映射关系不变，Navidrome 就能看到；
 - 如果 Navidrome 处于停止状态，联动会失败，这不影响本地修复；
 - 触发扫描后，Navidrome 的封面/歌词缓存可能需要一点时间刷新，必要时重启容器；
-- 设置页会显示「上次同步」：成功/失败、相对时间和具体结果；联动成功只代表服务器扫描/刷新成功，不代表每首歌都能找到歌词。
+- 设置页会显示「上次同步」：成功/失败、相对时间和具体结果；联动成功只代表服务器扫描/刷新成功，不代表每首歌都能找到歌词；
+- Navidrome 全量扫描不会自动重试已经判定为“无封面”的专辑；插件会在扫描后通过 docker 调用
+  `navidrome artwork reprocess --kind al --source absent -y` 自动重试。需要服务用户有 docker 权限，
+  或配置 `navidrome.container` 指定容器名。
+- 插件还会用 `navidrome missing fix` 把旧路径幽灵记录映射到现有文件；如果仍有已删除文件的残留，
+  可在 Navidrome 配置中设置 `Scanner.PurgeMissing = "always"`，或从 Web UI 的 Missing Files 里删除。
 
 ### Jellyfin 联动
 

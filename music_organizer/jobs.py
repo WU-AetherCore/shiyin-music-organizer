@@ -553,6 +553,15 @@ def notify_media_servers(
             from .navidrome import trigger_rescan
 
             ok, message = trigger_rescan(config, paths, full=True)
+            try:
+                from .navidrome import refresh_missing_artwork, remap_missing_files
+
+                _remap_ok, remap_message = remap_missing_files(config, paths)
+                message = f"{message}；{remap_message}"
+                _art_ok, art_message = refresh_missing_artwork(config, paths)
+                message = f"{message}；{art_message}"
+            except Exception as exc:
+                message = f"{message}；封面/缺失记录重试失败：{exc}"
             record("navidrome", ok, message)
             emit(("Navidrome 重新扫描：成功" if ok else "Navidrome 重新扫描失败：") + message)
         except Exception as exc:

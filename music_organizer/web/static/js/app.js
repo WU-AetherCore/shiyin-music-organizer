@@ -1689,6 +1689,8 @@ function renderSettings() {
             <label class="field"><span>密码</span><input class="input" type="password" data-setting="navidrome.password" value="" placeholder="留空则不修改"></label>
           </div>
           ${settingRow('修复后自动扫描', '每轮批量修复结束后自动触发一次扫描', `<label class="toggle"><input type="checkbox" data-setting="navidrome.rescan_after_fix" ${cfg.navidrome.rescan_after_fix ? 'checked' : ''}><span></span></label>`)}
+          ${settingRow('刷新缺失封面', '通过 docker 调用 Navidrome artwork reprocess；需要服务用户有 docker 权限', `<label class="toggle"><input type="checkbox" data-setting="navidrome.refresh_artwork" ${cfg.navidrome.refresh_artwork ? 'checked' : ''}><span></span></label>`)}
+          ${settingRow('清理缺失记录', '自动把移动/改标签后留下的幽灵记录重映射到现有文件', `<label class="toggle"><input type="checkbox" data-setting="navidrome.remap_missing" ${cfg.navidrome.remap_missing ? 'checked' : ''}><span></span></label>`)}
           <div style="display:flex;gap:8px;margin-top:14px"><button class="btn btn-ghost btn-sm" data-action="test-navidrome">测试连接</button><button class="btn btn-ghost btn-sm" data-action="navidrome-rescan">立即扫描</button></div>
           <div id="navidromeResult" class="modal-note" style="margin-top:10px"></div>
           ${integrationSyncHtml(cfg, 'navidrome')}

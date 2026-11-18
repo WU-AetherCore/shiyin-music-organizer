@@ -90,6 +90,9 @@
     "username": "",
     "password": "",
     "rescan_after_fix": false,
+    "refresh_artwork": true,
+    "remap_missing": true,
+    "container": "",
     "last_sync_at": "",
     "last_sync_ok": false,
     "last_sync_message": ""
