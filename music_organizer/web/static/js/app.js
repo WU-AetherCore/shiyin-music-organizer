@@ -137,7 +137,7 @@ const state = {
     items: [], total: 0, page: 1, page_size: 40, q: '', filter: 'all', sort: 'artist',
     counts: {}, loading: false, error: '', loaded: false, seq: 0,
   },
-  artists: { items: [], loading: false, selected: null, tab: 'songs', album: null },
+  artists: { items: [], loading: false, selected: null, tab: 'songs', album: null, sortSongs: 'default', sortAlbums: 'year' },
   selected: new Set(),
   settings: null,
   providersDraft: { lyrics: [], cover: [] },
@@ -152,6 +152,7 @@ const state = {
   repeat: localStorage.getItem('morg.repeat') || 'list',
   shuffle: localStorage.getItem('morg.shuffle') === '1',
   folder: { path: '', parent: '', roots: [], dirs: [], audio_count: 0, mandatory: false },
+  dirChoices: [],
   candidates: { data: null, kind: 'lyrics', trackId: 0, loading: false },
   trackDetail: null,
   files: {
@@ -358,9 +359,9 @@ async function route() {
   if (r === 'dashboard') renderDashboard();
   else if (r === 'library') { renderLibrary(); loadLibrary(); }
   else if (r === 'artists') { renderArtists(); loadArtists(); }
-  else if (r === 'files') { renderFiles(); loadFiles(); }
+  else if (r === 'files') { await loadDirChoices(); renderFiles(); loadFiles(); }
   else if (r === 'repair') renderRepair();
-  else if (r === 'automation') renderAutomation();
+  else if (r === 'automation') { await loadDirChoices(); renderAutomation(); }
   else if (r === 'settings') { await loadSettings(); renderSettings(); }
 }
 
@@ -704,15 +705,55 @@ async function artistOpen(name) {
   }
 }
 
-function artistSongRows(tracks) {
-  return (tracks || []).map((t, index) => `
+function artistSortSongs(tracks) {
+  const rows = [...(tracks || [])];
+  const mode = state.artists.sortSongs || 'default';
+  if (mode === 'title') rows.sort((a, b) => String(a.title || '').localeCompare(String(b.title || ''), 'zh-CN'));
+  else if (mode === 'album') rows.sort((a, b) => String(a.album || '').localeCompare(String(b.album || ''), 'zh-CN') || String(a.title || '').localeCompare(String(b.title || ''), 'zh-CN'));
+  else if (mode === 'year') rows.sort((a, b) => String(b.year || '').localeCompare(String(a.year || '')) || String(a.title || '').localeCompare(String(b.title || ''), 'zh-CN'));
+  else if (mode === 'duration') rows.sort((a, b) => Number(b.duration || 0) - Number(a.duration || 0));
+  else if (mode === 'added') rows.sort((a, b) => String(b.added_at || '').localeCompare(String(a.added_at || '')));
+  return rows;
+}
+
+function artistSortAlbums(albums) {
+  const rows = [...(albums || [])];
+  const mode = state.artists.sortAlbums || 'year';
+  if (mode === 'name') rows.sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'zh-CN'));
+  else if (mode === 'tracks') rows.sort((a, b) => Number(b.track_count || 0) - Number(a.track_count || 0));
+  else rows.sort((a, b) => String(b.year || '').localeCompare(String(a.year || '')) || String(a.name || '').localeCompare(String(b.name || ''), 'zh-CN'));
+  return rows;
+}
+
+function artistSongRows(tracks, showAlbum = true) {
+  return artistSortSongs(tracks).map((t, index) => `
     <div class="artist-song-row" data-action="play" data-id="${t.id}">
       <span class="idx">${String(index + 1).padStart(2, '0')}</span>
       <img class="artist-song-cover" src="${esc(t.cover_url)}" alt="">
-      <div class="artist-song-main"><b>${esc(t.title)}</b><span>${esc(t.album_display || t.album || '')}</span></div>
+      <div class="artist-song-main"><b>${esc(t.title)}</b>${showAlbum ? `<span>${esc(t.album_display || t.album || '')}</span>` : ''}</div>
       <span class="artist-song-dur">${esc(t.duration_text || '')}</span>
       <button class="icon-btn" data-action="open-track" data-id="${t.id}" title="详情">···</button>
     </div>`).join('');
+}
+
+function artistSortBar(kind) {
+  if (kind === 'albums') {
+    const value = state.artists.sortAlbums || 'year';
+    return `<label class="artist-sort"><span>排序</span><select class="select" id="artistAlbumSort">
+      <option value="year" ${value === 'year' ? 'selected' : ''}>按年份</option>
+      <option value="name" ${value === 'name' ? 'selected' : ''}>按专辑名</option>
+      <option value="tracks" ${value === 'tracks' ? 'selected' : ''}>按歌曲数</option>
+    </select></label>`;
+  }
+  const value = state.artists.sortSongs || 'default';
+  return `<label class="artist-sort"><span>排序</span><select class="select" id="artistSongSort">
+    <option value="default" ${value === 'default' ? 'selected' : ''}>默认顺序</option>
+    <option value="title" ${value === 'title' ? 'selected' : ''}>按歌名</option>
+    <option value="album" ${value === 'album' ? 'selected' : ''}>按专辑</option>
+    <option value="year" ${value === 'year' ? 'selected' : ''}>按年份</option>
+    <option value="duration" ${value === 'duration' ? 'selected' : ''}>按时长</option>
+    <option value="added" ${value === 'added' ? 'selected' : ''}>最近加入</option>
+  </select></label>`;
 }
 
 function renderArtists() {
@@ -726,16 +767,19 @@ function renderArtists() {
     </div>`;
     let body = '';
     if (album) {
-      body = `<div class="artist-subhead"><button class="icon-btn" data-action="artist-album-back">←</button><div><div class="artist-subtitle">${esc(artist.name)}</div><div class="artist-title-sm">${esc(album.name)}</div></div><span>${album.track_count || 0} 首</span></div>
+      body = `<div class="artist-subhead"><button class="artist-back artist-back-sm" data-action="artist-album-back">← 返回专辑</button><div><div class="artist-subtitle">${esc(artist.name)}</div><div class="artist-title-sm">${esc(album.name)}</div></div><span>${album.track_count || 0} 首</span></div>
+        <div class="artist-toolbar">${artistSortBar('songs')}</div>
         <div class="artist-song-list">${artistSongRows(album.tracks)}</div>`;
     } else if (a.tab === 'albums') {
-      body = `<div class="artist-album-grid">${(artist.albums || []).map((item) => `
+      body = `<div class="artist-toolbar">${artistSortBar('albums')}</div>
+        <div class="artist-album-grid">${artistSortAlbums(artist.albums).map((item) => `
         <button class="artist-album-card" data-action="artist-album" data-album="${esc(item.name)}">
           <img src="${esc(item.cover_url)}" alt="">
           <b>${esc(item.name)}</b><span>${item.track_count || 0} 首${item.year ? ' · ' + esc(item.year) : ''}</span>
         </button>`).join('')}</div>`;
     } else {
-      body = `<div class="artist-song-list">${artistSongRows(artist.tracks)}</div>`;
+      body = `<div class="artist-toolbar">${artistSortBar('songs')}</div>
+        <div class="artist-song-list">${artistSongRows(artist.tracks)}</div>`;
     }
     $('#view').innerHTML = `
       <div class="artist-page">
@@ -754,7 +798,7 @@ function renderArtists() {
             </div>
           </div>
         </div>
-        ${tabs}
+        <div class="artist-tabs-row">${tabs}</div>
         ${body}
       </div>`;
     return;
@@ -1321,7 +1365,8 @@ function fileOrganizePreviewHtml(data, kind) {
   </div>`;
 }
 
-function fileOrganizeModal() {
+async function fileOrganizeModal() {
+  await loadDirChoices();
   openModal(`
     <div class="modal-head"><div><div class="modal-title">一键整理</div><div class="modal-sub">可选择范围、目标根目录、歌手/专辑层级和文件名</div></div><button class="icon-btn modal-close" data-action="modal-cancel">${ICONS.close}</button></div>
     <div class="modal-body">
@@ -1334,13 +1379,10 @@ function fileOrganizeModal() {
           </select>
         </label>
         <label class="field"><span>目标根目录</span>
-          <select class="select" id="organizeBaseDir">
-            <option value="">音乐库根目录</option>
-            <option value="其他">放入「其他」里面</option>
-          </select>
+          <select class="select" id="organizeBaseDir">${dirOptionsHtml('', '音乐库根目录')}</select>
         </label>
       </div>
-      <div class="form-row" id="organizeScopeFolderWrap" style="display:none"><div class="form-label">要整理的文件夹 <span class="hint">相对音乐库</span></div><input class="input" id="organizeScopeFolder" value="${esc(state.files.path || '')}" placeholder="例如：其他"></div>
+      <div class="form-row" id="organizeScopeFolderWrap" style="display:none"><div class="form-label">要整理的文件夹 <span class="hint">从当前音乐目录读取</span></div><select class="select" id="organizeScopeFolder">${dirOptionsHtml(state.files.path, '音乐库根目录')}</select></div>
       <div class="form-row" id="organizeScopeArtistWrap" style="display:none"><div class="form-label">要整理的歌手</div><input class="input" id="organizeScopeArtist" placeholder="例如：周杰伦"></div>
       <div class="form-row"><div class="form-label">目录结构</div>
         <select class="select" id="organizeMode">
@@ -1659,6 +1701,26 @@ async function saveOrganization() {
   toast('自动整理设置已保存');
 }
 
+async function loadDirChoices() {
+  try {
+    const data = await api('/api/files/dirs');
+    state.dirChoices = data.dirs || [];
+  } catch (err) {
+    state.dirChoices = [];
+  }
+  return state.dirChoices;
+}
+
+function dirOptionsHtml(selected = '', rootLabel = '音乐库根目录') {
+  const choices = state.dirChoices || [];
+  const options = [`<option value="" ${selected === '' ? 'selected' : ''}>${esc(rootLabel)}</option>`];
+  choices.forEach((item) => {
+    if (!item.path) return;
+    options.push(`<option value="${esc(item.path)}" ${item.path === selected ? 'selected' : ''}>${esc(item.name)}</option>`);
+  });
+  return options.join('');
+}
+
 function renderAutomation() {
   const o = state.overview;
   const a = o.automation || {};
@@ -1799,10 +1861,7 @@ function renderAutomation() {
               </select>
             </label>
             <label class="field"><span>目标根目录</span>
-              <select class="select" id="orgBaseDir">
-                <option value="" ${org.base_dir === '' ? 'selected' : ''}>音乐库根目录</option>
-                <option value="其他" ${(org.base_dir || '其他') === '其他' ? 'selected' : ''}>放入「其他」里面</option>
-              </select>
+              <select class="select" id="orgBaseDir">${dirOptionsHtml(org.base_dir || '其他', '音乐库根目录')}</select>
             </label>
           </div>
           <div class="form-row" style="margin-top:10px"><div class="form-label">文件名模板</div><input class="input" id="orgFileTemplate" value="${esc(org.file_template || '{artist} - {title}')}"></div>
@@ -3646,7 +3705,7 @@ async function handleAction(action, el, event) {
       await fileRestoreOriginal();
       break;
     case 'file-organize':
-      fileOrganizeModal();
+      await fileOrganizeModal();
       break;
     case 'file-organize-preview':
       await fileOrganizePreview();
@@ -3799,6 +3858,16 @@ function bindEvents() {
     if (target.id === 'fileSort') {
       state.files.sort = target.value;
       loadFiles();
+      return;
+    }
+    if (target.id === 'artistSongSort') {
+      state.artists.sortSongs = target.value;
+      renderArtists();
+      return;
+    }
+    if (target.id === 'artistAlbumSort') {
+      state.artists.sortAlbums = target.value;
+      renderArtists();
       return;
     }
     if (target.id === 'organizeScope') {
