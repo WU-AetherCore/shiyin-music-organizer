@@ -148,6 +148,16 @@ def test_duplicates_endpoint(env):
     assert data["total"] >= 0
 
 
+def test_no_lyrics_mark_hides_missing_count(env):
+    client = env["client"]
+    item = client.get("/api/tracks?page_size=1").get_json()["items"][0]
+    assert client.post(f"/api/tracks/{item['id']}/no-lyrics", json={"value": True}).status_code == 200
+    overview = client.get("/api/overview").get_json()
+    assert overview["stats"]["missing_lyrics"] == overview["filters"]["missing_lyrics"]
+    listing = client.get("/api/tracks?filter=missing_lyrics").get_json()
+    assert listing["total"] == overview["filters"]["missing_lyrics"]
+
+
 def test_duplicate_ignore_and_auto_clean(env):
     import shutil
     from music_organizer.scanner import scan_library

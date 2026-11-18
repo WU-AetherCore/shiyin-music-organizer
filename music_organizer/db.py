@@ -566,7 +566,7 @@ def filter_counts(paths: Optional[AppPaths] = None) -> Dict[str, int]:
             """
             SELECT COUNT(*) AS total,
               SUM(CASE WHEN has_cover=0 THEN 1 ELSE 0 END) AS missing_cover,
-              SUM(CASE WHEN has_lyrics=0 THEN 1 ELSE 0 END) AS missing_lyrics,
+              SUM(CASE WHEN has_lyrics=0 AND no_lyrics=0 THEN 1 ELSE 0 END) AS missing_lyrics,
               SUM(CASE WHEN tag_issues NOT IN ('[]','') THEN 1 ELSE 0 END) AS issues,
               SUM(CASE WHEN has_lyrics=1 AND lyrics_timing_status IN ('broken','suspect') THEN 1 ELSE 0 END) AS timing_issues,
               SUM(CASE WHEN favorite=1 THEN 1 ELSE 0 END) AS favorite
