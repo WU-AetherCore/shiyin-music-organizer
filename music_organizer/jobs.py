@@ -247,7 +247,7 @@ def _auto_fix_new(config: Config, paths: AppPaths, manager: JobManager, new_ids:
         config,
         paths,
         manager,
-        tracks=need,
+        ids=[int(track["id"]) for track in need],
         targets=targets,
         force=False,
         dry_run=False,

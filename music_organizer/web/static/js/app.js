@@ -137,7 +137,7 @@ const state = {
     items: [], total: 0, page: 1, page_size: 40, q: '', filter: 'all', sort: 'artist',
     counts: {}, loading: false, error: '', loaded: false, seq: 0,
   },
-  artists: { items: [], loading: false, selected: null, tab: 'songs', album: null, sortSongs: 'default', sortAlbums: 'year' },
+  artists: { items: [], loading: false, selected: null, tab: 'albums', album: null, sortSongs: 'default', sortAlbums: 'year' },
   selected: new Set(),
   settings: null,
   providersDraft: { lyrics: [], cover: [] },
@@ -692,7 +692,7 @@ async function artistOpen(name) {
   a.loading = true;
   a.selected = { name };
   a.album = null;
-  a.tab = 'songs';
+  a.tab = 'albums';
   if (state.route === 'artists') renderArtists();
   try {
     a.selected = (await api('/api/artist?name=' + encodeURIComponent(name))).artist;

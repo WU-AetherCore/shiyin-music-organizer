@@ -49,9 +49,11 @@ def create_app(
         SESSION_COOKIE_NAME="morg_session",
         PERMANENT_SESSION_LIFETIME=7 * 24 * 3600,
         TEMPLATES_AUTO_RELOAD=debug,
-        JSON_AS_ASCII=False,
+        JSON_AS_ASCII=True,
     )
-    app.json.ensure_ascii = False
+    # 非 UTF-8 ZIP 解压出的文件名会以 surrogateescape 形式进入 Python；
+    # ensure_ascii 把它们转成合法 JSON 转义，避免单个坏文件名导致整个 API 500。
+    app.json.ensure_ascii = True
 
     manager = jobs.get_manager(config, paths)
     if enable_automation:
