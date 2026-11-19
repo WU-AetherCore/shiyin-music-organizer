@@ -154,8 +154,12 @@ def test_no_lyrics_mark_hides_missing_count(env):
     assert client.post(f"/api/tracks/{item['id']}/no-lyrics", json={"value": True}).status_code == 200
     overview = client.get("/api/overview").get_json()
     assert overview["stats"]["missing_lyrics"] == overview["filters"]["missing_lyrics"]
+    assert overview["stats"]["instrumental"] == 1
+    assert overview["filters"]["instrumental"] == 1
     listing = client.get("/api/tracks?filter=missing_lyrics").get_json()
     assert listing["total"] == overview["filters"]["missing_lyrics"]
+    pure = client.get("/api/tracks?filter=instrumental").get_json()
+    assert pure["total"] == 1
 
 
 def test_duplicate_ignore_and_auto_clean(env):

@@ -433,6 +433,7 @@ _FILTER_SQL = {
     "issues": "tag_issues NOT IN ('[]', '')",
     "error": "health='error'",
     "ok": "health='ok'",
+    "instrumental": "no_lyrics=1",
     "favorite": "favorite=1",
     "unsynced_lyrics": "has_lyrics=1 AND lyrics_synced=0",
     "no_embedded_cover": "has_cover=1 AND cover_source!='embed'",
@@ -509,6 +510,7 @@ def stats(paths: Optional[AppPaths] = None) -> Dict[str, Any]:
               COALESCE(SUM(CASE WHEN tag_issues NOT IN ('[]','') THEN 1 ELSE 0 END), 0) AS issues,
               COALESCE(SUM(CASE WHEN health='error' THEN 1 ELSE 0 END), 0) AS errors,
               COALESCE(SUM(CASE WHEN has_lyrics=1 AND lyrics_synced=1 THEN 1 ELSE 0 END), 0) AS synced_lyrics,
+              COALESCE(SUM(CASE WHEN no_lyrics=1 THEN 1 ELSE 0 END), 0) AS instrumental,
               COALESCE(SUM(CASE WHEN has_lyrics=1 AND lyrics_timing_status IN ('broken','suspect') THEN 1 ELSE 0 END), 0) AS timing_issues,
               COALESCE(SUM(CASE WHEN has_cover=1 AND cover_source='embed' THEN 1 ELSE 0 END), 0) AS embedded_covers
             FROM tracks
@@ -546,6 +548,7 @@ def stats(paths: Optional[AppPaths] = None) -> Dict[str, Any]:
         "size": int(row["size"] or 0),
         "missing_cover": missing_cover,
         "missing_lyrics": missing_lyrics,
+        "instrumental": int(row["instrumental"] or 0),
         "missing_both": int(row["missing_both"] or 0),
         "issues": issues,
         "errors": errors,
@@ -567,6 +570,7 @@ def filter_counts(paths: Optional[AppPaths] = None) -> Dict[str, int]:
             SELECT COUNT(*) AS total,
               SUM(CASE WHEN has_cover=0 THEN 1 ELSE 0 END) AS missing_cover,
               SUM(CASE WHEN has_lyrics=0 AND no_lyrics=0 THEN 1 ELSE 0 END) AS missing_lyrics,
+              SUM(CASE WHEN no_lyrics=1 THEN 1 ELSE 0 END) AS instrumental,
               SUM(CASE WHEN tag_issues NOT IN ('[]','') THEN 1 ELSE 0 END) AS issues,
               SUM(CASE WHEN has_lyrics=1 AND lyrics_timing_status IN ('broken','suspect') THEN 1 ELSE 0 END) AS timing_issues,
               SUM(CASE WHEN favorite=1 THEN 1 ELSE 0 END) AS favorite

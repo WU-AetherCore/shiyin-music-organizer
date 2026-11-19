@@ -832,6 +832,7 @@ function renderLibrary() {
     ['bad_lyrics', '时间轴', counts.timing_issues || 0],
     ['issues', '标签异常', counts.issues || 0],
     ['duplicates', '重复', dupCount],
+    ['instrumental', '纯音乐', counts.instrumental || 0],
     ['favorite', '收藏', counts.favorite || 0],
   ];
   const chips = filters.map(([key, label, count]) => `
@@ -2196,9 +2197,10 @@ function lrcSummaryHtml() {
   const data = state.lrcStats;
   if (!data) return '<div class="lrc-loading">点击「重新扫描」检查外置歌词</div>';
   const c = data.counts || {};
+  const inst = (state.overview && state.overview.stats && state.overview.stats.instrumental) || 0;
   return `
     <div class="lrc-stat"><span class="num">${c.total || 0}</span><span class="lbl">全部 .lrc</span><span class="hint">${fmtSize(c.size)}</span></div>
-    <div class="lrc-stat ok"><span class="num">${c.redundant || 0}</span><span class="lbl">已有内嵌</span><span class="hint">可安全清理</span></div>
+    <div class="lrc-stat ok"><span class="num">${c.redundant || 0}</span><span class="lbl">已有内嵌</span><span class="hint">${inst ? '另有 ' + inst + ' 首纯音乐' : '可安全清理'}</span></div>
     <div class="lrc-stat warn"><span class="num">${c.orphan || 0}</span><span class="lbl">失联歌词</span><span class="hint">没有对应音频</span></div>
     <div class="lrc-stat ${c.sidecar_only ? 'danger' : ''}"><span class="num">${c.sidecar_only || 0}</span><span class="lbl">仅外置</span><span class="hint">删除会丢歌词</span></div>`;
 }
