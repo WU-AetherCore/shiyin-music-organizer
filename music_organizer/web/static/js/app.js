@@ -169,6 +169,7 @@ const state = {
   playRetry: 0,
   lastPlayTime: 0,
   retrying: false,
+  compatFallback: false,
 };
 
 const audio = $('#audio');
@@ -2137,6 +2138,7 @@ function renderSettings() {
         ${settingsCard('check', '播放音质', playbackIsOriginal ? '原始文件直通，不做二次编码' : '服务端实时转码，默认仍然直通', `
           ${settingRow('播放模式', '默认原始文件直通；修改后下一首生效', `<select class="select" data-setting="playback.quality" style="width:150px">
             <option value="original" ${playbackIsOriginal ? 'selected' : ''}>原始文件直通</option>
+            <option value="flac_48" ${playbackQualityValue === 'flac_48' ? 'selected' : ''}>FLAC 48kHz 兼容</option>
             <option value="mp3_320" ${playbackQualityValue === 'mp3_320' ? 'selected' : ''}>MP3 320 kbps</option>
             <option value="mp3_192" ${playbackQualityValue === 'mp3_192' ? 'selected' : ''}>MP3 192 kbps</option>
             <option value="mp3_128" ${playbackQualityValue === 'mp3_128' ? 'selected' : ''}>MP3 128 kbps</option>
@@ -2415,6 +2417,7 @@ function updatePlayModeUI() {
 
 const PLAYBACK_QUALITY_LABELS = {
   original: '原始文件直通',
+  flac_48: 'FLAC 48kHz 兼容',
   mp3_320: 'MP3 320 kbps',
   mp3_192: 'MP3 192 kbps',
   mp3_128: 'MP3 128 kbps',
@@ -2430,11 +2433,11 @@ function playbackQualityLabel(value = playbackQuality()) {
   return PLAYBACK_QUALITY_LABELS[value] || PLAYBACK_QUALITY_LABELS.original;
 }
 
-function playbackStreamUrl(track) {
+function playbackStreamUrl(track, overrideQuality = '') {
   const base = track.stream_url || `/media/stream/${track.id}`;
   try {
     const url = new URL(base, location.origin);
-    const quality = playbackQuality();
+    const quality = overrideQuality || playbackQuality();
     if (quality !== 'original') url.searchParams.set('quality', quality);
     else url.searchParams.delete('quality');
     return `${url.pathname}${url.search}`;
@@ -2458,6 +2461,7 @@ async function loadTrack(track) {
   state.lyrics = { lines: [], text: '', offset: track.lyrics_offset_ms || 0, active: -1, synced: false, source: '' };
   state.playRetry = 0;
   state.retrying = false;
+  state.compatFallback = false;
   state.lastPlayTime = 0;
   audio.preload = 'auto';
   updatePlayerShell();
@@ -2466,7 +2470,7 @@ async function loadTrack(track) {
     track.stream_url = `/media/stream/${track.id}`;
   }
   audio.src = playbackStreamUrl(track);
-  audio.play().catch(() => toast('浏览器阻止了自动播放，请再点一次播放', 'err'));
+  playAudioSafe();
   document.title = `${track.title} · 本地音乐整理小插件`;
   startPlayTimer();
   await loadLyrics(track.id);
@@ -2624,7 +2628,7 @@ function togglePlay() {
     if (state.library.items.length) playTracks(state.library.items, state.library.items[0].id);
     return;
   }
-  if (audio.paused) audio.play().catch(() => toast('无法播放这个文件', 'err'));
+  if (audio.paused) playAudioSafe();
   else audio.pause();
 }
 
@@ -3878,9 +3882,40 @@ function setBuffering(value) {
   document.body.classList.toggle('buffering', Boolean(value));
 }
 
+function playAudioSafe(message = '无法播放这个文件') {
+  const promise = audio.play();
+  if (!promise || typeof promise.catch !== 'function') return;
+  promise.catch((err) => {
+    // 切换歌曲/暂停会中断上一个 play()，这不是文件损坏，不要误报。
+    if (err && err.name === 'AbortError') return;
+    if (err && err.name === 'NotAllowedError') {
+      toast('浏览器阻止了自动播放，请再点一次播放', 'err');
+      return;
+    }
+    toast(message, 'err');
+  });
+}
+
 function handleAudioError() {
   if (!state.current || state.retrying) return;
   setBuffering(false);
+  // 24bit/192kHz FLAC 在部分 Chromium/系统音频设备上会解码失败。
+  // 仅对这类高解析文件自动降为 48kHz 无损 FLAC，原文件不改。
+  const highRes = Number(state.current.sample_rate || 0) > 96000;
+  if (highRes && playbackQuality() === 'original' && !state.compatFallback) {
+    state.compatFallback = true;
+    state.playRetry = 0;
+    state.retrying = true;
+    setBuffering(true);
+    toast('高解析度格式浏览器不支持，正在切换兼容播放…', 'err', 3000);
+    audio.src = playbackStreamUrl(state.current, 'flac_48');
+    audio.load();
+    audio.play().catch(() => {
+      state.retrying = false;
+      setBuffering(false);
+    });
+    return;
+  }
   const resumeAt = Math.max(audio.currentTime || 0, state.lastPlayTime || 0);
   // 播放到一半断开：自动续播最多两次；开头就失败则直接提示
   if (resumeAt > 1 && state.playRetry < 2) {

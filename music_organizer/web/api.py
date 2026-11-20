@@ -1229,6 +1229,7 @@ def media_cover(track_id: int):
 
 
 PLAYBACK_QUALITIES: Dict[str, tuple] = {
+    "flac_48": ("audio/flac", ["-c:a", "flac", "-ar", "48000", "-f", "flac"]),
     "mp3_320": ("audio/mpeg", ["-c:a", "libmp3lame", "-b:a", "320k", "-f", "mp3"]),
     "mp3_192": ("audio/mpeg", ["-c:a", "libmp3lame", "-b:a", "192k", "-f", "mp3"]),
     "mp3_128": ("audio/mpeg", ["-c:a", "libmp3lame", "-b:a", "128k", "-f", "mp3"]),
