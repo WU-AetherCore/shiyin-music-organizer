@@ -336,9 +336,10 @@ def run() -> int:
             creationflags=0x08000000,
         )
         last_window = {"state": None}
+        stop_watch = threading.Event()
 
         def watch_window() -> None:
-            while proc.poll() is None:
+            while not stop_watch.is_set():
                 snapshot = read_window_snapshot(proc.pid)
                 if snapshot:
                     last_window["state"] = snapshot
@@ -352,16 +353,34 @@ def run() -> int:
         server.close()
         return 1
 
-    # Edge 可能把窗口交给同 profile 的主进程，因此同时监听进程退出。
-    try:
-        proc.wait()
-    except KeyboardInterrupt:
-        pass
-    final_state = read_window_snapshot(proc.pid) or last_window.get("state")
+    # Edge 可能把窗口交给同 profile 的主进程后自身退出。
+    # 不能只等 Popen 进程，否则启动约十几秒后会把窗口和后端一起关掉。
+    started = time.time()
+    seen_window = False
+    missing_since = None
+    while True:
+        handles = find_app_window(proc.pid)
+        if handles:
+            seen_window = True
+            missing_since = None
+        else:
+            if seen_window:
+                if missing_since is None:
+                    missing_since = time.time()
+                elif time.time() - missing_since > 3.0:
+                    break
+            elif proc.poll() is not None and time.time() - started > 20.0:
+                break
+            elif time.time() - started > 45.0 and not seen_window:
+                break
+        time.sleep(0.4)
+
+    stop_watch.set()
+    final_state = last_window.get("state")
     if final_state:
         save_window_state(final_state)
         log("window state saved " + json.dumps(final_state, ensure_ascii=False))
-    log("edge closed")
+    log("edge window closed")
     try:
         app.config["MORG_AUTOMATION"].stop()
     except Exception:

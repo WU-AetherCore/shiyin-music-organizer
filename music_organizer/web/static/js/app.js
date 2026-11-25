@@ -2336,9 +2336,12 @@ function lrcSummaryHtml() {
   if (!data) return '<div class="lrc-loading">点击「重新扫描」检查外置歌词</div>';
   const c = data.counts || {};
   const inst = (state.overview && state.overview.stats && state.overview.stats.instrumental) || 0;
+  const st = (state.overview && state.overview.stats) || {};
+  const embedded = Math.max(0, (st.total || 0) - (st.missing_lyrics || 0));
   return `
+    <div class="lrc-stat"><span class="num">${embedded}</span><span class="lbl">内嵌歌词</span><span class="hint">曲库歌曲</span></div>
     <div class="lrc-stat"><span class="num">${c.total || 0}</span><span class="lbl">.lrc 文件总数</span><span class="hint">${fmtSize(c.size)}</span></div>
-    <div class="lrc-stat ok"><span class="num">${c.redundant || 0}</span><span class="lbl">冗余 .lrc</span><span class="hint">${inst ? '另有 ' + inst + ' 首纯音乐' : '音频内已有歌词，可安全清理'}</span></div>
+    <div class="lrc-stat ok"><span class="num">${c.redundant || 0}</span><span class="lbl">冗余 .lrc</span><span class="hint">${inst ? '另有 ' + inst + ' 首纯音乐' : '音频内已有歌词'}</span></div>
     <div class="lrc-stat warn"><span class="num">${c.orphan || 0}</span><span class="lbl">失联 .lrc</span><span class="hint">找不到对应音频文件</span></div>
     <div class="lrc-stat ${c.sidecar_only ? 'danger' : ''}"><span class="num">${c.sidecar_only || 0}</span><span class="lbl">仅外置 .lrc</span><span class="hint">删除后该曲目将没有歌词</span></div>`;
 }
