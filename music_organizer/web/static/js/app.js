@@ -2599,9 +2599,9 @@ function startEq() {
         const sourceIndex = buffer ? Math.min(buffer.length - 1, Math.floor((index / Math.max(1, bars.length - 1)) * (buffer.length * 0.72))) : 0;
         const spectrum = buffer ? buffer[sourceIndex] / 255 : 0;
         const wave = 0.5 + 0.5 * Math.sin((now || 0) / 230 + index * 0.72);
-        // 灵敏度约为上一版的一半，低频不再全部顶到上限。
-        const boosted = Math.min(1, Math.pow(Math.max(0, spectrum), 0.70) * 0.78);
-        const energy = Math.max(boosted, wave * 0.20);
+        // 灵敏度约为上一版的 40%，保持动态但不会频繁顶满。
+        const boosted = Math.min(1, Math.pow(Math.max(0, spectrum), 0.70) * 0.62);
+        const energy = Math.max(boosted, wave * 0.16);
         const hue = (index * 37 + (now || 0) / 38 + energy * 105) % 360;
         const scale = Math.min(1, 0.08 + energy * 0.90);
         bar.style.transform = `scaleY(${scale.toFixed(3)})`;
@@ -4404,11 +4404,9 @@ function bindEvents() {
   const playerReveal = $('#playerReveal');
   if (playerReveal) {
     playerReveal.addEventListener('mouseenter', showPlayerBar);
+    playerReveal.addEventListener('mouseleave', () => { if (audio.paused) schedulePlayerHide(); });
     playerReveal.addEventListener('click', showPlayerBar);
   }
-  document.addEventListener('mousemove', (event) => {
-    if (event.clientY > window.innerHeight - 86) showPlayerBar();
-  }, { passive: true });
 
   // 播放器
   audio.addEventListener('play', () => { updatePlayIcons(); startPlayTimer(); showPlayerBar(); startEq(); });
