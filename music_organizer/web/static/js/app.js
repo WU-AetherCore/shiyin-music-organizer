@@ -2180,7 +2180,6 @@ function renderSettings() {
           </div>`)}
 
         ${settingsCard('list', '外置歌词清理', '曲库歌词覆盖与 .lrc 文件统计要分开看；这里清理的是外置歌词文件', `
-          <div class="settings-note" style="margin-bottom:10px">曲库内嵌歌词：<b>${(stats.total || 0) - (stats.missing_lyrics || 0)} / ${stats.total || 0}</b> 首（${lyricsCoverage}%）。下面的 126 等数字是外置 .lrc 文件数量，不是曲库歌词总数。</div>
           <div id="lrcSummary" class="lrc-summary"><div class="lrc-loading">正在检查 .lrc 文件…</div></div>
           <div class="lrc-options">
             <label class="checkline"><input type="checkbox" id="lrcStatusRedundant" checked> 已有内嵌歌词的 .lrc（可安全清理）</label>
