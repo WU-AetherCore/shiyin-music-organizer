@@ -4420,6 +4420,15 @@ function bindEvents() {
   // 全局路由
   window.addEventListener('hashchange', () => route());
 
+  // 每日推荐跨天后自动换一批（页面一直开着也能更新）
+  setInterval(() => {
+    if (state.route !== 'daily' || !state.daily.date) return;
+    if (state.daily.date !== dailyDateString()) {
+      state.daily.shuffle = 0;
+      loadDaily(true);
+    }
+  }, 60000);
+
   // 定时刷新概览（每 60 秒）
   setInterval(() => {
     if (document.hidden) return;
