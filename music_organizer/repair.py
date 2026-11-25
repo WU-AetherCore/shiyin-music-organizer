@@ -6,6 +6,7 @@ import errno
 import os
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
@@ -199,54 +200,63 @@ class RepairService:
 
         lyrics_hit: Optional[LyricsHit] = None
         cover_hit: Optional[CoverHit] = None
-        if need_lyrics:
-            if cancel is not None and cancel.is_set():
-                outcome.status = "skipped"
-                outcome.message = "已取消"
-                return outcome
-            report = provider_search_lyrics(query, self.config, limit=10)
-            if timing_bad:
-                candidate = self._choose_timing_lyrics(report.hits, duration, min_score)
-                if candidate is not None:
-                    candidate_timing = analyze_lyric_timing(candidate.text, duration)
-                    current_rank = self._timing_rank(timing_before)
-                    candidate_rank = self._timing_rank(candidate_timing)
-                    better = candidate_rank > current_rank or (
-                        candidate_rank == current_rank
-                        and int(candidate_timing.get("lines") or 0) > int(timing_before.get("lines") or 0)
-                        and float(candidate_timing.get("last") or 0) <= duration + 3
-                    )
-                    if not better:
-                        candidate = None
-                lyrics_hit = candidate
-            else:
-                lyrics_hit = choose_best_lyrics(report.hits, min_score)
-            outcome.lyrics = {
-                "requested": True,
-                "found": bool(lyrics_hit),
-                "errors": report.errors,
-                "provider": PROVIDER_LABELS.get(lyrics_hit.provider, "") if lyrics_hit else "",
-                "score": lyrics_hit.score if lyrics_hit else 0,
-                "synced": lyrics_hit.synced if lyrics_hit else False,
-                "candidate": _hit_brief(lyrics_hit) if lyrics_hit else None,
-                "timing_before": timing_before,
-            }
         cover_report = None
+        cover_pool: Optional[ThreadPoolExecutor] = None
+        cover_future = None
         if need_cover:
-            if cancel is not None and cancel.is_set():
-                outcome.status = "skipped"
-                outcome.message = "已取消"
-                return outcome
-            cover_report = provider_search_covers(query, self.config, limit=10)
-            cover_hit = self._choose_cover(cover_report.hits, query, min_score)
-            outcome.cover = {
-                "requested": True,
-                "found": bool(cover_hit),
-                "errors": cover_report.errors,
-                "provider": PROVIDER_LABELS.get(cover_hit.provider, "") if cover_hit else "",
-                "score": cover_hit.score if cover_hit else 0,
-                "candidate": _hit_brief(cover_hit) if cover_hit else None,
-            }
+            cover_pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="morg-cover")
+            cover_future = cover_pool.submit(provider_search_covers, query, self.config, 10)
+        try:
+            if need_lyrics:
+                if cancel is not None and cancel.is_set():
+                    outcome.status = "skipped"
+                    outcome.message = "已取消"
+                    return outcome
+                report = provider_search_lyrics(query, self.config, limit=10)
+                if timing_bad:
+                    candidate = self._choose_timing_lyrics(report.hits, duration, min_score)
+                    if candidate is not None:
+                        candidate_timing = analyze_lyric_timing(candidate.text, duration)
+                        current_rank = self._timing_rank(timing_before)
+                        candidate_rank = self._timing_rank(candidate_timing)
+                        better = candidate_rank > current_rank or (
+                            candidate_rank == current_rank
+                            and int(candidate_timing.get("lines") or 0) > int(timing_before.get("lines") or 0)
+                            and float(candidate_timing.get("last") or 0) <= duration + 3
+                        )
+                        if not better:
+                            candidate = None
+                    lyrics_hit = candidate
+                else:
+                    lyrics_hit = choose_best_lyrics(report.hits, min_score)
+                outcome.lyrics = {
+                    "requested": True,
+                    "found": bool(lyrics_hit),
+                    "errors": report.errors,
+                    "provider": PROVIDER_LABELS.get(lyrics_hit.provider, "") if lyrics_hit else "",
+                    "score": lyrics_hit.score if lyrics_hit else 0,
+                    "synced": lyrics_hit.synced if lyrics_hit else False,
+                    "candidate": _hit_brief(lyrics_hit) if lyrics_hit else None,
+                    "timing_before": timing_before,
+                }
+            if need_cover:
+                if cancel is not None and cancel.is_set():
+                    outcome.status = "skipped"
+                    outcome.message = "已取消"
+                    return outcome
+                cover_report = cover_future.result() if cover_future is not None else None
+                cover_hit = self._choose_cover(cover_report.hits, query, min_score)
+                outcome.cover = {
+                    "requested": True,
+                    "found": bool(cover_hit),
+                    "errors": cover_report.errors,
+                    "provider": PROVIDER_LABELS.get(cover_hit.provider, "") if cover_hit else "",
+                    "score": cover_hit.score if cover_hit else 0,
+                    "candidate": _hit_brief(cover_hit) if cover_hit else None,
+                }
+        finally:
+            if cover_pool is not None:
+                cover_pool.shutdown(wait=True)
 
         if dry_run:
             outcome.status = "dry_run" if (lyrics_hit or cover_hit or wants_tags) else "not_found"

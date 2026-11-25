@@ -182,9 +182,11 @@ def _cache_put(key: str, report: SearchReport) -> None:
 
 
 def _provider_kwargs(config: Config) -> Dict[str, Any]:
+    # 批量修复时必须给在线数据源设置硬上限，避免某个源长期挂起把整批任务拖死。
+    timeout = min(6.0, max(2.0, float(config.get("providers.timeout") or 6)))
     return {
-        "timeout": float(config.get("providers.timeout") or 6),
-        "retries": int(config.get("providers.retries") or 0),
+        "timeout": timeout,
+        "retries": 0,
         "proxy": str(config.get("providers.proxy") or ""),
     }
 
@@ -199,7 +201,7 @@ def _run_providers(
 ) -> Tuple[Dict[str, List[Any]], List[Dict[str, str]]]:
     kwargs = _provider_kwargs(config)
     parallel = bool(config.get("providers.parallel", True))
-    timeout = float(config.get("providers.timeout") or 6)
+    timeout = min(6.0, max(2.0, float(config.get("providers.timeout") or 6)))
     results: Dict[str, List[Any]] = {}
     errors: List[Dict[str, str]] = []
 
@@ -228,7 +230,7 @@ def _run_providers(
         pool = ThreadPoolExecutor(max_workers=min(4, len(active_names)), thread_name_prefix="provider")
         futures = {pool.submit(call, name): name for name in active_names}
         try:
-            for future in as_completed(futures, timeout=max(8.0, timeout * 2 + 2)):
+            for future in as_completed(futures, timeout=max(6.0, timeout + 2.0)):
                 name = futures[future]
                 try:
                     results[name] = future.result()

@@ -10,7 +10,7 @@ import threading
 import time
 import uuid
 from collections import deque
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -352,6 +352,11 @@ def start_batch(
     paths = paths or get_paths()
     manager = manager or get_manager(config, paths)
     target_list = list(targets or config.get("repair.targets") or ["lyrics", "cover"])
+    # 修复任务串行执行；已有任务在跑时直接复用它，避免重复点击排出一堆
+    # total=0、永远停在 0% 的排队任务。
+    existing = manager.running("repair")
+    if existing:
+        return existing[0].id
 
     tracks: List[Dict[str, Any]] = []
     if ids:
@@ -364,17 +369,23 @@ def start_batch(
     tracks = [track for track in tracks if Path(track.get("path") or "").is_file()]
 
     def runner(job: Job) -> Dict[str, Any]:
-        service = RepairService(config, paths)
         total = len(tracks)
         job.total = total
-        job.message = "准备修复…"
+        job.message = "正在修复…"
         job.log(f"待处理 {total} 首，目标：{'、'.join(_target_label(t) for t in target_list)}")
         changed_paths: List[str] = []
-        for index, track in enumerate(tracks, start=1):
+        state_lock = threading.Lock()
+        workers = max(1, min(4, int(config.get("repair.workers") or 4)))
+        completed = 0
+
+        def process(track: Dict[str, Any]) -> None:
+            nonlocal completed
             if job.cancel_event.is_set():
-                break
-            job.current = track_display(track)[:80]
+                return
+            with state_lock:
+                job.current = track_display(track)[:80]
             try:
+                service = RepairService(config, paths)
                 outcome = service.repair(
                     track,
                     targets=target_list,
@@ -391,28 +402,44 @@ def start_batch(
                     "message": str(exc)[:200],
                 }
             status = data.get("status")
-            if status in ("fixed", "partial"):
-                job.succeeded += 1
-                changed_paths.append(str(track.get("path") or ""))
-            elif status in ("skipped", "dry_run"):
-                job.skipped += 1
-            elif status in ("not_found",):
-                job.skipped += 1
+            with state_lock:
+                if status in ("fixed", "partial"):
+                    job.succeeded += 1
+                    changed_paths.append(str(track.get("path") or ""))
+                elif status in ("skipped", "dry_run", "not_found"):
+                    job.skipped += 1
+                else:
+                    job.failed += 1
+                job.add_item(
+                    {
+                        "track_id": data.get("track_id"),
+                        "title": data.get("title"),
+                        "status": status,
+                        "message": data.get("message", ""),
+                        "lyrics": (data.get("lyrics") or {}).get("applied"),
+                        "cover": (data.get("cover") or {}).get("applied"),
+                    }
+                )
+                completed += 1
+                job.progress(completed, total)
+                if status in ("fixed", "partial", "error"):
+                    job.log(f"{data.get('title')} → {_status_label(status)} {data.get('message', '')}")
+
+        pool = ThreadPoolExecutor(max_workers=workers, thread_name_prefix="morg-repair")
+        futures = [pool.submit(process, track) for track in tracks]
+        try:
+            for future in as_completed(futures):
+                if job.cancel_event.is_set():
+                    break
+                try:
+                    future.result()
+                except Exception:
+                    pass
+        finally:
+            if job.cancel_event.is_set():
+                pool.shutdown(wait=False, cancel_futures=True)
             else:
-                job.failed += 1
-            job.add_item(
-                {
-                    "track_id": data.get("track_id"),
-                    "title": data.get("title"),
-                    "status": status,
-                    "message": data.get("message", ""),
-                    "lyrics": (data.get("lyrics") or {}).get("applied"),
-                    "cover": (data.get("cover") or {}).get("applied"),
-                }
-            )
-            if status in ("fixed", "partial", "error"):
-                job.log(f"{data.get('title')} → {_status_label(status)} {data.get('message', '')}")
-            job.progress(index, total)
+                pool.shutdown(wait=True)
         job.message = (
             f"完成 {job.done}/{job.total}：成功 {job.succeeded}，跳过 {job.skipped}，失败 {job.failed}"
             if not job.cancel_event.is_set()
