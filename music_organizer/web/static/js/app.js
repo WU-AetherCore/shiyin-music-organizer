@@ -138,6 +138,7 @@ const state = {
     counts: {}, loading: false, error: '', loaded: false, seq: 0,
   },
   artists: { items: [], loading: false, selected: null, tab: 'albums', album: null, sortSongs: 'default', sortAlbums: 'year' },
+  daily: { items: [], all: [], tab: 'recommend', loading: false, date: '', shuffle: 0, q: '' },
   selected: new Set(),
   settings: null,
   providersDraft: { lyrics: [], cover: [] },
@@ -170,6 +171,12 @@ const state = {
   lastPlayTime: 0,
   retrying: false,
   compatFallback: false,
+  coverSpin: false,
+  playerHideTimer: null,
+  eqRaf: 0,
+  audioCtx: null,
+  audioAnalyser: null,
+  audioSource: null,
 };
 
 const audio = $('#audio');
@@ -329,6 +336,7 @@ function updateShell() {
 const PAGE_META = {
   dashboard: ['概览', '欢迎回来，这里是你的本地曲库'],
   library: ['音乐库', '浏览、播放与批量修复'],
+  daily: ['每日推荐', '每天从你的曲库里挑一些好听的'],
   artists: ['歌手', '按歌手浏览歌曲与专辑'],
   files: ['文件管理', '浏览、整理与导入当前音乐目录'],
   repair: ['修复中心', '让每一首歌都有正确的歌词与封面'],
@@ -359,6 +367,7 @@ async function route() {
   }
   if (r === 'dashboard') renderDashboard();
   else if (r === 'library') { renderLibrary(); loadLibrary(); }
+  else if (r === 'daily') { renderDaily(); loadDaily(); }
   else if (r === 'artists') { renderArtists(); loadArtists(); }
   else if (r === 'files') { await loadDirChoices(); renderFiles(); loadFiles(); }
   else if (r === 'repair') renderRepair();
@@ -818,6 +827,123 @@ function renderArtists() {
     <div class="artists-page">
       <div class="artists-head"><div><div class="artist-kicker">ARTISTS</div><h1>歌手</h1><p>${(a.items || []).length} 位歌手 · 按歌曲数量排序</p></div></div>
       <div class="artist-grid">${cards || `<div class="empty-note">${a.loading ? '正在加载歌手…' : '还没有歌手'}</div>`}</div>
+    </div>`;
+}
+
+function dailyDateString() {
+  const now = new Date();
+  const pad = (value) => String(value).padStart(2, '0');
+  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+}
+
+function dailySeed(date, id, salt = 0) {
+  let h = 2166136261;
+  const text = `${date}:${id}:${salt}`;
+  for (let i = 0; i < text.length; i += 1) {
+    h ^= text.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return h >>> 0;
+}
+
+function dailyPick(all, date, salt = 0, count = 12) {
+  return [...(all || [])]
+    .sort((a, b) => dailySeed(date, a.id, salt) - dailySeed(date, b.id, salt))
+    .slice(0, count);
+}
+
+async function loadDaily(force = false) {
+  const d = state.daily;
+  const date = dailyDateString();
+  if (!force && d.all.length && d.date === date) {
+    d.items = dailyPick(d.all, date, d.shuffle);
+    renderDaily();
+    return;
+  }
+  d.loading = true;
+  renderDaily();
+  try {
+    const all = [];
+    let page = 1;
+    while (page <= 8) {
+      const data = await api(`/api/tracks?page=${page}&page_size=200&filter=all&sort=artist`);
+      const items = data.items || [];
+      all.push(...items);
+      if (items.length < 200 || all.length >= (data.total || 0)) break;
+      page += 1;
+    }
+    d.all = all;
+    d.date = date;
+    d.items = dailyPick(all, date, d.shuffle);
+  } catch (err) {
+    toast(err.message, 'err');
+  } finally {
+    d.loading = false;
+    if (state.route === 'daily') renderDaily();
+  }
+}
+
+function dailyVisibleItems() {
+  const d = state.daily;
+  const query = (d.q || '').trim().toLowerCase();
+  let rows = d.all || [];
+  if (d.tab === 'recommend') rows = d.items || [];
+  else if (d.tab === 'recent') rows = [...rows].sort((a, b) => String(b.added_at || '').localeCompare(String(a.added_at || ''))).slice(0, 120);
+  else if (d.tab === 'favorite') rows = rows.filter((track) => track.favorite);
+  if (query) {
+    rows = rows.filter((track) => `${track.title} ${track.artist} ${track.album}`.toLowerCase().includes(query));
+  }
+  return rows;
+}
+
+function dailyCard(track) {
+  return `<button class="daily-card" data-action="daily-play" data-id="${track.id}" title="点击封面直接播放">
+    <div class="daily-cover">
+      <img src="${esc(track.cover_url)}" alt="" loading="lazy">
+      <span class="daily-play-icon">${ICONS.play}</span>
+    </div>
+    <b>${esc(track.title)}</b>
+    <span>${esc(track.artist_display)}${track.album ? ' · ' + esc(track.album) : ''}</span>
+  </button>`;
+}
+
+function renderDaily() {
+  const d = state.daily;
+  if (!d.all.length && d.loading) {
+    $('#view').innerHTML = `<div class="daily-page"><div class="daily-loading"><div class="boot-orb"></div><p>正在为今天挑选歌曲…</p></div></div>`;
+    return;
+  }
+  const tabs = [
+    ['recommend', '每日推荐', (d.items || []).length],
+    ['all', '全部歌曲', (d.all || []).length],
+    ['recent', '最近添加', Math.min(120, (d.all || []).length)],
+    ['favorite', '我的收藏', (d.all || []).filter((track) => track.favorite).length],
+  ];
+  const rows = dailyVisibleItems();
+  const dateText = d.date || dailyDateString();
+  const heroes = (d.items || []).slice(0, 3);
+  const heroCovers = heroes.map((track, index) => `<img class="daily-hero-cover c${index}" src="${esc(track.cover_url)}" alt="">`).join('');
+  $('#view').innerHTML = `
+    <div class="daily-page">
+      <section class="daily-hero">
+        <div class="daily-hero-copy">
+          <div class="artist-kicker">DAILY MIX · ${esc(dateText)}</div>
+          <h1>每日推荐</h1>
+          <p>每天从你的 ${d.all.length} 首曲库里挑选 ${Math.min(12, d.all.length)} 首，点击封面直接播放。</p>
+          <div class="daily-hero-actions">
+            <button class="btn btn-primary" data-action="daily-play-all">${ICONS.play}<span>播放今日推荐</span></button>
+            <button class="btn btn-ghost" data-action="daily-shuffle-all">随机播放全部</button>
+            <button class="btn btn-ghost" data-action="daily-refresh">换一批</button>
+          </div>
+        </div>
+        <div class="daily-hero-art">${heroCovers}</div>
+      </section>
+      <div class="daily-tabs">
+        ${tabs.map(([key, label, count]) => `<button class="daily-tab ${d.tab === key ? 'active' : ''}" data-action="daily-tab" data-tab="${key}">${label}<em>${count}</em></button>`).join('')}
+        <label class="daily-search"><span>搜索</span><input class="input" id="dailySearch" placeholder="歌名、歌手、专辑" value="${esc(d.q || '')}"></label>
+      </div>
+      ${d.tab === 'recommend' ? `<div class="daily-section-head"><div><b>${d.shuffle ? '换一批推荐' : '今日推荐'}</b><span>${esc(dateText)} · 每天 0 点自动更新</span></div><span>${rows.length} 首</span></div>` : ''}
+      <div class="daily-grid">${rows.map(dailyCard).join('') || '<div class="empty-note">这里还没有歌曲</div>'}</div>
     </div>`;
 }
 
@@ -2365,6 +2491,7 @@ function renderNowPlaying() {
   $('#npTitle').textContent = t.title;
   $('#npArtist').textContent = t.artist_display + (t.album ? ' · ' + t.album : '');
   $('#npCover').src = t.cover_url;
+  syncCoverSpin();
   $('#npGlow').style.backgroundImage = `url("${t.cover_url}")`;
   $('#npBackdrop').style.backgroundImage = `url("${t.cover_url}")`;
   $('#npMeta').innerHTML = `
@@ -2402,6 +2529,85 @@ function buildEqBars() {
   };
   make($('#pbEq'), 22);
   make($('#npEq'), 30);
+}
+
+function showPlayerBar() {
+  const bar = $('#playerBar');
+  if (!bar) return;
+  bar.classList.remove('idle-hidden');
+  clearTimeout(state.playerHideTimer);
+  state.playerHideTimer = null;
+}
+
+function schedulePlayerHide() {
+  clearTimeout(state.playerHideTimer);
+  state.playerHideTimer = setTimeout(() => {
+    if (!audio.paused) return;
+    const bar = $('#playerBar');
+    if (bar) bar.classList.add('idle-hidden');
+  }, 3000);
+}
+
+function initAudioAnalyser() {
+  if (state.audioCtx) return;
+  const Ctx = window.AudioContext || window.webkitAudioContext;
+  if (!Ctx) return;
+  try {
+    state.audioCtx = new Ctx();
+    state.audioSource = state.audioCtx.createMediaElementSource(audio);
+    state.audioAnalyser = state.audioCtx.createAnalyser();
+    state.audioAnalyser.fftSize = 128;
+    state.audioAnalyser.smoothingTimeConstant = 0.78;
+    state.audioSource.connect(state.audioAnalyser);
+    state.audioAnalyser.connect(state.audioCtx.destination);
+  } catch (err) {
+    state.audioCtx = null;
+    state.audioAnalyser = null;
+    state.audioSource = null;
+  }
+}
+
+function stopEq() {
+  cancelAnimationFrame(state.eqRaf);
+  state.eqRaf = 0;
+  $$('.eq-bars span').forEach((bar) => {
+    bar.style.transform = 'scaleY(0.22)';
+    bar.style.opacity = '';
+    bar.style.background = '';
+  });
+}
+
+function startEq() {
+  initAudioAnalyser();
+  if (!state.audioAnalyser || !state.audioCtx) return;
+  if (state.audioCtx.state === 'suspended') state.audioCtx.resume().catch(() => {});
+  cancelAnimationFrame(state.eqRaf);
+  const buffer = new Uint8Array(state.audioAnalyser.frequencyBinCount);
+  const roots = $$('.eq-bars');
+  roots.forEach((root) => root.classList.add('eq-live'));
+  const frames = () => {
+    if (audio.paused) { stopEq(); return; }
+    state.audioAnalyser.getByteFrequencyData(buffer);
+    roots.forEach((root) => {
+      const bars = root.querySelectorAll('span');
+      bars.forEach((bar, index) => {
+        const sourceIndex = Math.min(buffer.length - 1, Math.floor((index / Math.max(1, bars.length - 1)) * (buffer.length * 0.72)));
+        const value = buffer[sourceIndex] / 255;
+        bar.style.transform = `scaleY(${(0.16 + value * 0.95).toFixed(3)})`;
+        bar.style.opacity = (0.55 + value * 0.45).toFixed(2);
+        bar.style.background = `linear-gradient(180deg, hsl(${168 + value * 95}, 92%, 64%), hsl(${198 + value * 65}, 88%, 52%))`;
+      });
+    });
+    state.eqRaf = requestAnimationFrame(frames);
+  };
+  state.eqRaf = requestAnimationFrame(frames);
+}
+
+function syncCoverSpin() {
+  const wrap = $('#npCoverWrap');
+  if (!wrap) return;
+  wrap.classList.toggle('spin-cover', Boolean(state.coverSpin));
+  wrap.title = state.coverSpin ? '点击恢复方形封面' : '点击切换圆形旋转封面';
 }
 
 function updatePlayModeUI() {
@@ -2470,6 +2676,7 @@ async function loadTrack(track) {
     track.stream_url = `/media/stream/${track.id}`;
   }
   audio.src = playbackStreamUrl(track);
+  showPlayerBar();
   playAudioSafe();
   document.title = `${track.title} · 本地音乐整理小插件`;
   startPlayTimer();
@@ -3328,6 +3535,32 @@ async function handleAction(action, el, event) {
       } catch (err) { toast(err.message, 'err'); }
       break;
     }
+    case 'daily-tab':
+      state.daily.tab = el.dataset.tab || 'recommend';
+      renderDaily();
+      break;
+    case 'daily-play': {
+      const queue = dailyVisibleItems();
+      if (queue.length) await playTracks(queue, id);
+      break;
+    }
+    case 'daily-play-all': {
+      const queue = dailyVisibleItems();
+      if (queue.length) await playTracks(queue, queue[0].id);
+      break;
+    }
+    case 'daily-shuffle-all': {
+      const queue = [...(state.daily.all || [])].sort(() => Math.random() - 0.5);
+      state.daily.tab = 'all';
+      if (queue.length) await playTracks(queue, queue[0].id);
+      renderDaily();
+      break;
+    }
+    case 'daily-refresh':
+      state.daily.shuffle += 1;
+      state.daily.items = dailyPick(state.daily.all, state.daily.date, state.daily.shuffle);
+      renderDaily();
+      break;
     case 'artist-open':
       await artistOpen(el.dataset.name || '');
       break;
@@ -3369,6 +3602,11 @@ async function handleAction(action, el, event) {
       break;
     case 'close-track':
       closeTrack();
+      break;
+    case 'toggle-cover-spin':
+      state.coverSpin = !state.coverSpin;
+      syncCoverSpin();
+      toast(state.coverSpin ? '圆形旋转封面' : '已恢复方形封面', 'ok', 1500);
       break;
     case 'open-player':
       openPlayer();
@@ -4065,6 +4303,16 @@ function bindEvents() {
   });
 
   document.addEventListener('input', (event) => {
+    if (event.target.id === 'dailySearch') {
+      state.daily.q = event.target.value;
+      renderDaily();
+      const input = $('#dailySearch');
+      if (input) {
+        input.focus();
+        input.setSelectionRange(input.value.length, input.value.length);
+      }
+      return;
+    }
     if (event.target.id === 'fileSearch') {
       state.files.q = event.target.value;
       clearTimeout(state.files.searchTimer);
@@ -4135,9 +4383,23 @@ function bindEvents() {
     if (event.key === 'Enter') { event.preventDefault(); doSearch(); }
   });
 
+  const playerBar = $('#playerBar');
+  if (playerBar) {
+    playerBar.addEventListener('mouseenter', showPlayerBar);
+    playerBar.addEventListener('mouseleave', () => { if (audio.paused) schedulePlayerHide(); });
+  }
+  const playerReveal = $('#playerReveal');
+  if (playerReveal) {
+    playerReveal.addEventListener('mouseenter', showPlayerBar);
+    playerReveal.addEventListener('click', showPlayerBar);
+  }
+  document.addEventListener('mousemove', (event) => {
+    if (event.clientY > window.innerHeight - 86) showPlayerBar();
+  }, { passive: true });
+
   // 播放器
-  audio.addEventListener('play', () => { updatePlayIcons(); startPlayTimer(); });
-  audio.addEventListener('pause', () => { updatePlayIcons(); });
+  audio.addEventListener('play', () => { updatePlayIcons(); startPlayTimer(); showPlayerBar(); startEq(); });
+  audio.addEventListener('pause', () => { updatePlayIcons(); schedulePlayerHide(); stopEq(); });
   audio.addEventListener('ended', () => nextTrack(true));
   audio.addEventListener('loadedmetadata', () => { updateProgress(); });
   audio.addEventListener('timeupdate', () => {
@@ -4184,6 +4446,8 @@ async function init() {
   await route();
   if (!state.overview.initialized) {
     openFolderPicker(true);
+  } else {
+    schedulePlayerHide();
   }
 }
 
