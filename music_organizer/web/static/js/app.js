@@ -179,6 +179,10 @@ const state = {
   audioSource: null,
 };
 
+try {
+  state.coverSpin = localStorage.getItem('morg.coverSpin') === '1';
+} catch (err) { /* 忽略隐私模式限制 */ }
+
 const audio = $('#audio');
 const recentToasts = new Map();
 
@@ -2579,23 +2583,27 @@ function stopEq() {
 
 function startEq() {
   initAudioAnalyser();
-  if (!state.audioAnalyser || !state.audioCtx) return;
+  if (!state.audioCtx) return;
   if (state.audioCtx.state === 'suspended') state.audioCtx.resume().catch(() => {});
   cancelAnimationFrame(state.eqRaf);
-  const buffer = new Uint8Array(state.audioAnalyser.frequencyBinCount);
+  const analyser = state.audioAnalyser;
+  const buffer = analyser ? new Uint8Array(analyser.frequencyBinCount) : null;
   const roots = $$('.eq-bars');
   roots.forEach((root) => root.classList.add('eq-live'));
-  const frames = () => {
+  const frames = (now) => {
     if (audio.paused) { stopEq(); return; }
-    state.audioAnalyser.getByteFrequencyData(buffer);
+    if (analyser && buffer) analyser.getByteFrequencyData(buffer);
     roots.forEach((root) => {
       const bars = root.querySelectorAll('span');
       bars.forEach((bar, index) => {
-        const sourceIndex = Math.min(buffer.length - 1, Math.floor((index / Math.max(1, bars.length - 1)) * (buffer.length * 0.72)));
-        const value = buffer[sourceIndex] / 255;
-        bar.style.transform = `scaleY(${(0.16 + value * 0.95).toFixed(3)})`;
-        bar.style.opacity = (0.55 + value * 0.45).toFixed(2);
-        bar.style.background = `linear-gradient(180deg, hsl(${168 + value * 95}, 92%, 64%), hsl(${198 + value * 65}, 88%, 52%))`;
+        const sourceIndex = buffer ? Math.min(buffer.length - 1, Math.floor((index / Math.max(1, bars.length - 1)) * (buffer.length * 0.72))) : 0;
+        const spectrum = buffer ? buffer[sourceIndex] / 255 : 0;
+        const wave = 0.5 + 0.5 * Math.sin((now || 0) / 230 + index * 0.72);
+        const energy = Math.max(spectrum, wave * 0.28);
+        const hue = (index * 37 + (now || 0) / 38 + energy * 105) % 360;
+        bar.style.transform = `scaleY(${(0.08 + energy * 0.96).toFixed(3)})`;
+        bar.style.opacity = (0.62 + energy * 0.38).toFixed(2);
+        bar.style.background = `linear-gradient(180deg, hsl(${hue.toFixed(0)} 96% 70%), hsl(${((hue + 42) % 360).toFixed(0)} 90% 52%))`;
       });
     });
     state.eqRaf = requestAnimationFrame(frames);
@@ -2926,6 +2934,7 @@ function closeQueue() {
 function openPlayer() {
   $('#nowPlaying').classList.add('open');
   $('#nowPlaying').setAttribute('aria-hidden', 'false');
+  syncCoverSpin();
   document.body.classList.add('no-scroll');
   if (state.current) {
     renderNowPlaying();
@@ -3605,8 +3614,9 @@ async function handleAction(action, el, event) {
       break;
     case 'toggle-cover-spin':
       state.coverSpin = !state.coverSpin;
+      try { localStorage.setItem('morg.coverSpin', state.coverSpin ? '1' : '0'); } catch (err) { /* 忽略 */ }
       syncCoverSpin();
-      toast(state.coverSpin ? '圆形旋转封面' : '已恢复方形封面', 'ok', 1500);
+      toast(state.coverSpin ? '圆形旋转封面（已记住）' : '已恢复方形封面（已记住）', 'ok', 1500);
       break;
     case 'open-player':
       openPlayer();
@@ -4456,6 +4466,7 @@ async function init() {
   if (!state.overview.initialized) {
     openFolderPicker(true);
   } else {
+    syncCoverSpin();
     schedulePlayerHide();
   }
 }
