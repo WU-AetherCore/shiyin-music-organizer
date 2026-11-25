@@ -37,6 +37,7 @@ def build_query(meta: Dict[str, Any]) -> TrackQuery:
     path = str(meta.get("path") or "")
     filename = str(meta.get("filename") or Path(path).name)
     folder = Path(path).parent.name if path else ""
+    parent_folder = Path(path).parent.parent.name if path else ""
 
     tag_title = clean_spaces(meta.get("title"))
     tag_artist = clean_spaces(meta.get("artist"))
@@ -48,6 +49,28 @@ def build_query(meta: Dict[str, Any]) -> TrackQuery:
     duration = float(meta.get("duration") or 0)
 
     parsed = parse_filename(filename, folder)
+    # 常见目录：歌手/专辑/歌名.flac。专辑目录通常带 “01.” 之类的编号，
+    # 这时向上一层找歌手，修复 kuwo 这类占位标签的曲目。
+    album_like = bool(re.match(r"^\s*\d+[\s._-]+", folder))
+    if parent_folder and (not parsed.get("folder_artist") or album_like):
+        parent_parsed = parse_filename(filename, parent_folder)
+        if parent_parsed.get("folder_artist"):
+            parsed["folder_artist"] = parent_parsed["folder_artist"]
+        merged = list(parent_parsed.get("variants") or [])
+        for item in parsed.get("variants") or []:
+            if item not in merged:
+                merged.append(item)
+        parsed["variants"] = merged
+        if parent_parsed.get("artist"):
+            parsed["artist"] = parent_parsed["artist"]
+    # 有些文件把专辑名误写成歌手；此时优先使用目录推导出的歌手。
+    folder_clean = re.sub(r"^\s*\d+[\s._-]+", "", folder)
+    if tag_artist and parsed.get("artist") and normalize_key(tag_artist) in {
+        normalize_key(folder),
+        normalize_key(folder_clean),
+        normalize_key(album),
+    }:
+        tag_artist = ""
     pairs: List[Tuple[str, str]] = []
     seen: set = set()
 
@@ -81,7 +104,7 @@ def build_query(meta: Dict[str, Any]) -> TrackQuery:
         add(parsed.get("clean") or Path(filename).stem, "")
 
     primary_title = tag_title or (pairs[0][0] if pairs else "")
-    primary_artist = tag_artist or (pairs[0][1] if pairs else "")
+    primary_artist = tag_artist or next((artist for _title, artist in pairs if artist), "")
     context = " ".join(filter(None, [tag_title, filename, album, folder]))
     versions = detect_versions(context)
     # 选秀/现场专辑里的音频通常是 Live 版，避免把 (Live) 当成错误版本扣 45 分

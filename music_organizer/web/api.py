@@ -26,7 +26,9 @@ from ..providers import (
     provider_self_test,
 )
 from ..repair import RepairService, track_display
+from ..matcher import build_query
 from ..textutil import (
+    clean_placeholder,
     format_duration,
     format_quality,
     format_size,
@@ -85,7 +87,23 @@ def _track_or_404(track_id: int) -> Dict[str, Any]:
 
 
 def _display_title(track: Dict[str, Any]) -> str:
-    return track.get("title") or Path(track.get("filename") or "未命名").stem
+    try:
+        inferred = build_query(track)
+        if inferred.title:
+            return inferred.title
+    except Exception:
+        pass
+    return clean_placeholder(track.get("title")) or Path(track.get("filename") or "未命名").stem
+
+
+def _display_artist(track: Dict[str, Any]) -> str:
+    try:
+        inferred = build_query(track)
+        if inferred.artist:
+            return inferred.artist
+    except Exception:
+        pass
+    return clean_placeholder(track.get("artist")) or "未知歌手"
 
 
 def track_json(track: Dict[str, Any], base: str = "") -> Dict[str, Any]:
@@ -102,10 +120,10 @@ def track_json(track: Dict[str, Any], base: str = "") -> Dict[str, Any]:
         "id": track_id,
         "title": _display_title(track),
         "title_raw": track.get("title") or "",
-        "artist": track.get("artist") or "",
-        "artist_display": track.get("artist") or "未知歌手",
-        "album": track.get("album") or "",
-        "album_display": track.get("album") or "未知专辑",
+        "artist": _display_artist(track),
+        "artist_display": _display_artist(track),
+        "album": clean_placeholder(track.get("album")) or "",
+        "album_display": clean_placeholder(track.get("album")) or "未知专辑",
         "year": track.get("year") or "",
         "genre": track.get("genre") or "",
         "track_no": track.get("track_no"),

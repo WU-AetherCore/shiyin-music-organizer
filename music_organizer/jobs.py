@@ -22,6 +22,7 @@ from . import duplicates as duplicate_service
 from .config import Config
 from .paths import AppPaths, get_paths
 from .repair import RepairService, track_display
+from .providers import reset_breakers
 
 
 def _now() -> str:
@@ -369,6 +370,7 @@ def start_batch(
     tracks = [track for track in tracks if Path(track.get("path") or "").is_file()]
 
     def runner(job: Job) -> Dict[str, Any]:
+        reset_breakers()
         total = len(tracks)
         job.total = total
         job.message = "正在修复…"

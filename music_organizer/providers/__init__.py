@@ -147,6 +147,12 @@ def breaker_status() -> Dict[str, Dict[str, Any]]:
         return {name: dict(item) for name, item in _breaker.items()}
 
 
+def reset_breakers() -> None:
+    """每次手动修复重新给在线源一次机会，避免上一轮网络抖动把整轮都跳过。"""
+    with _breaker_lock:
+        _breaker.clear()
+
+
 def _cache_key(kind: str, query: TrackQuery, providers: Iterable[str]) -> str:
     raw = "|".join(
         [
@@ -181,9 +187,9 @@ def _cache_put(key: str, report: SearchReport) -> None:
         _report_cache[key] = (time.time(), report)
 
 
-def _provider_kwargs(config: Config) -> Dict[str, Any]:
+def _provider_kwargs(config: Config, timeout_limit: float = 6.0) -> Dict[str, Any]:
     # 批量修复时必须给在线数据源设置硬上限，避免某个源长期挂起把整批任务拖死。
-    timeout = min(6.0, max(2.0, float(config.get("providers.timeout") or 6)))
+    timeout = max(2.0, min(float(timeout_limit), float(config.get("providers.timeout") or timeout_limit)))
     return {
         "timeout": timeout,
         "retries": 0,
@@ -198,10 +204,11 @@ def _run_providers(
     query: TrackQuery,
     config: Config,
     limit: int,
+    timeout_limit: float = 6.0,
 ) -> Tuple[Dict[str, List[Any]], List[Dict[str, str]]]:
-    kwargs = _provider_kwargs(config)
+    kwargs = _provider_kwargs(config, timeout_limit)
     parallel = bool(config.get("providers.parallel", True))
-    timeout = min(6.0, max(2.0, float(config.get("providers.timeout") or 6)))
+    timeout = kwargs["timeout"]
     results: Dict[str, List[Any]] = {}
     errors: List[Dict[str, str]] = []
 
@@ -266,7 +273,7 @@ def search_lyrics(query: TrackQuery, config: Config, limit: int = 10) -> SearchR
         return cached
 
     started = time.time()
-    results, errors = _run_providers(names, LYRICS_PROVIDERS, "search", query, config, limit)
+    results, errors = _run_providers(names, LYRICS_PROVIDERS, "search", query, config, limit, timeout_limit=22.0)
     hits: List[LyricsHit] = []
     for index, name in enumerate(names):
         bonus = max(0.0, 3.0 - index * 0.6)
@@ -300,7 +307,7 @@ def search_covers(query: TrackQuery, config: Config, limit: int = 10) -> SearchR
         return cached
 
     started = time.time()
-    results, errors = _run_providers(names, COVER_PROVIDERS, "search", query, config, limit)
+    results, errors = _run_providers(names, COVER_PROVIDERS, "search", query, config, limit, timeout_limit=8.0)
     hits: List[CoverHit] = []
     for index, name in enumerate(names):
         bonus = max(0.0, 3.0 - index * 0.6)
