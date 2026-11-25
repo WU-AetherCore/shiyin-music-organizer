@@ -2599,9 +2599,12 @@ function startEq() {
         const sourceIndex = buffer ? Math.min(buffer.length - 1, Math.floor((index / Math.max(1, bars.length - 1)) * (buffer.length * 0.72))) : 0;
         const spectrum = buffer ? buffer[sourceIndex] / 255 : 0;
         const wave = 0.5 + 0.5 * Math.sin((now || 0) / 230 + index * 0.72);
-        const energy = Math.max(spectrum, wave * 0.28);
+        // 提高灵敏度：低电平也明显起跳，同时限制峰值避免溢出。
+        const boosted = Math.min(1, Math.pow(Math.max(0, spectrum), 0.62) * 1.55);
+        const energy = Math.max(boosted, wave * 0.36);
         const hue = (index * 37 + (now || 0) / 38 + energy * 105) % 360;
-        bar.style.transform = `scaleY(${(0.08 + energy * 0.96).toFixed(3)})`;
+        const scale = Math.min(1, 0.10 + energy * 0.98);
+        bar.style.transform = `scaleY(${scale.toFixed(3)})`;
         bar.style.opacity = (0.62 + energy * 0.38).toFixed(2);
         bar.style.background = `linear-gradient(180deg, hsl(${hue.toFixed(0)} 96% 70%), hsl(${((hue + 42) % 360).toFixed(0)} 90% 52%))`;
       });

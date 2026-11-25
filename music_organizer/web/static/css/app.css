@@ -1496,3 +1496,7 @@ body:not(.is-playing) .np-cover-wrap.spin-cover .np-cover { animation-play-state
 .daily-card > span { display: block; margin-top: 3px; font-size: 10.5px; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .daily-card .daily-play-icon { display: grid; color: #fff; font-size: initial; margin: 0; }
 .daily-card .daily-play-icon svg { fill: currentColor; }
+
+/* 频谱高度加倍 + 更高灵敏度 */
+.player-eq { height: 28px; margin-inline: 34px; }
+.np-eq { height: 64px; }
