@@ -27,6 +27,7 @@ from ..providers import (
 )
 from ..repair import RepairService, track_display
 from ..matcher import build_query
+from ..providers import reset_breakers
 from ..textutil import (
     clean_placeholder,
     format_duration,
@@ -674,6 +675,7 @@ def candidates(track_id: int):
         raise ApiError("kind 只能是 lyrics 或 cover")
     service = RepairService(_cfg(), _paths())
     try:
+        reset_breakers()
         report = service.search_lyrics(track, limit=10) if kind == "lyrics" else service.search_covers(track, limit=10)
     except Exception as exc:
         raise ApiError(f"检索失败：{exc}", 502)
