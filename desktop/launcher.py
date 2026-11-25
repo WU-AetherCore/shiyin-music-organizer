@@ -156,8 +156,22 @@ def darken_titlebar(process_id: int, timeout: float = 12.0) -> bool:
     return False
 
 
+def is_app_window_title(text: str) -> bool:
+    if "本地音乐整理小插件" not in text:
+        return False
+    lower = text.lower()
+    # 普通 Edge / Chrome 浏览器标签页也可能包含这个标题，必须排除。
+    return (
+        "microsoft edge" not in lower
+        and "google chrome" not in lower
+        and "mozilla firefox" not in lower
+        and " - 个人" not in text
+        and "和另外" not in text
+    )
+
+
 def find_app_window(process_id: int):
-    """优先按 Edge 主进程找，找不到时按拾音窗口标题兜底。"""
+    """优先按 Edge 主进程找，找不到时按拾音应用窗口标题兜底。"""
     handles = find_edge_window(process_id)
     if handles:
         return handles
@@ -173,7 +187,7 @@ def find_app_window(process_id: int):
             return True
         text = ctypes.create_unicode_buffer(length + 1)
         user32.GetWindowTextW(hwnd, text, length + 1)
-        if "本地音乐整理小插件" in text.value or text.value.strip() == "拾音":
+        if is_app_window_title(text.value) or text.value.strip() == "拾音":
             found.append(hwnd)
         return True
 
@@ -243,6 +257,26 @@ def save_window_state(state: dict) -> None:
         temp.replace(path)
     except Exception:
         log("save window state failed\n" + traceback.format_exc())
+
+
+def stop_app_edge(profile: Path) -> None:
+    """只结束使用拾音专用配置目录的 Edge 进程，不影响普通浏览器。"""
+    try:
+        escaped = str(profile).replace("'", "''")
+        script = (
+            "Get-CimInstance Win32_Process -Filter \"Name='msedge.exe'\" | "
+            f"Where-Object {{ $_.CommandLine -like '*{escaped}*' }} | "
+            "ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }"
+        )
+        subprocess.run(
+            ["powershell", "-NoProfile", "-NonInteractive", "-Command", script],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            creationflags=0x08000000,
+            timeout=10,
+        )
+    except Exception:
+        log("stop app edge failed\n" + traceback.format_exc())
 
 
 def run() -> int:
@@ -376,6 +410,7 @@ def run() -> int:
         time.sleep(0.4)
 
     stop_watch.set()
+    stop_app_edge(profile)
     final_state = last_window.get("state")
     if final_state:
         save_window_state(final_state)
