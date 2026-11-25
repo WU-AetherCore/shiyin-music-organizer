@@ -2189,6 +2189,7 @@ function renderSettings() {
           <div style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap">
             <button class="btn btn-ghost btn-sm" data-action="lrc-scan">重新扫描</button>
             <button class="btn btn-soft btn-sm" data-action="lrc-embed">把外置歌词写入内嵌</button>
+            <button class="btn btn-ghost btn-sm" data-action="lrc-export">在歌曲旁生成 .lrc</button>
             <button class="btn btn-ghost btn-sm" data-action="lrc-clean">清理选中</button>
           </div>
           <p class="modal-note" style="margin-top:10px">清理会移动到数据目录的 <code class="mono">trash/lrc-*</code>，不是直接删除，可随时找回。</p>
@@ -3969,6 +3970,16 @@ async function handleAction(action, el, event) {
         }
       } catch (err) { toast(err.message, 'err'); }
       break;
+    case 'lrc-export': {
+      try {
+        const res = await api('/api/lrc/export', { method: 'POST' });
+        toast(`已生成 ${res.created || 0} 个 .lrc，跳过 ${res.skipped || 0} 个`, 'ok', 4200);
+        await loadLrcStats();
+      } catch (err) {
+        toast(err.message, 'err');
+      }
+      break;
+    }
     case 'lrc-clean':
       await cleanLrc();
       break;

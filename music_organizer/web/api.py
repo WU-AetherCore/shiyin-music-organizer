@@ -1179,6 +1179,34 @@ def lrc_embed():
     return jsonify({"ok": True, "job_id": job_id})
 
 
+@bp.post("/lrc/export")
+def lrc_export():
+    """把音频里已有的内嵌歌词导出成同名 .lrc，不修改音频。"""
+    created = 0
+    skipped = 0
+    errors = []
+    for track in db.all_tracks(_paths()):
+        if not track.get("has_lyrics"):
+            continue
+        path = Path(track.get("path") or "")
+        if not path.is_file():
+            continue
+        target = path.with_suffix(".lrc")
+        if target.exists():
+            skipped += 1
+            continue
+        try:
+            text, _source = audio.read_lyrics(path)
+            if not text.strip():
+                skipped += 1
+                continue
+            audio.write_lrc_sidecar(path, text)
+            created += 1
+        except Exception as exc:
+            errors.append({"id": track.get("id"), "error": str(exc)[:160]})
+    return jsonify({"ok": True, "created": created, "skipped": skipped, "errors": errors})
+
+
 @bp.get("/export/m3u")
 def export_m3u():
     cfg = _cfg()

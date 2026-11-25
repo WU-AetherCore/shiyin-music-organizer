@@ -173,7 +173,7 @@ def find_app_window(process_id: int):
             return True
         text = ctypes.create_unicode_buffer(length + 1)
         user32.GetWindowTextW(hwnd, text, length + 1)
-        if text.value.strip() in ("本地音乐整理小插件", "拾音"):
+        if "本地音乐整理小插件" in text.value or text.value.strip() == "拾音":
             found.append(hwnd)
         return True
 
