@@ -485,6 +485,11 @@ function renderDashboard() {
 
   const jobs = o.jobs || [];
   const runningJob = jobs.find((j) => j.status === 'running' || j.status === 'queued');
+  if (runningJob && state.jobId !== runningJob.id) {
+    state.jobId = runningJob.id;
+    state.job = runningJob;
+    watchJob(runningJob.id, { silent: true });
+  }
 
   $('#view').innerHTML = `
     <div class="dash">
@@ -1658,7 +1663,7 @@ function renderRepair() {
   const s = o.stats || {};
   const status = o.automation.status || {};
   const timingCount = Number(s.timing_issues || 0);
-  const job = state.job;
+  const job = state.job || (o.jobs || []).find((j) => j.status === 'running' || j.status === 'queued');
   const recentJobs = (o.jobs || []).slice(0, 6).map((j) => `
     <div class="recent-job">
       <span class="jtitle">${esc(j.title)}</span>
