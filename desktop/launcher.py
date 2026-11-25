@@ -20,7 +20,7 @@ from pathlib import Path
 
 APP_NAME = "拾音"
 MUTEX_NAME = "Local\\ShiyinMusicOrganizerDesktop"
-APP_VERSION = "1.3.39"
+APP_VERSION = "1.3.40"
 FIXED_PORT = 8765
 
 if not getattr(sys, "frozen", False):
