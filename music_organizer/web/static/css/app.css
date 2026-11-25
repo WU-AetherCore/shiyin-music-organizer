@@ -751,7 +751,7 @@ h1, h2, h3, h4, p { margin: 0; }
 .player {
   position: fixed; left: calc(var(--sidebar-w) + 24px); right: 24px; bottom: 16px;
   height: var(--player-h); z-index: 50;
-  display: grid; grid-template-columns: minmax(190px, 0.9fr) minmax(340px, 560px) minmax(300px, 1.1fr);
+  display: grid; grid-template-columns: minmax(190px, 1fr) minmax(340px, 560px) minmax(190px, 1fr);
   align-items: center; gap: 16px; padding: 0 18px;
   border-radius: 20px; border: 1px solid rgba(140, 155, 220, 0.16);
   background: linear-gradient(120deg, rgba(18, 24, 42, 0.94), rgba(11, 15, 27, 0.96));
@@ -1169,7 +1169,7 @@ body:not(.is-playing) .eq-bars { opacity: 0; }
   .hero-side { justify-content: flex-start; }
   .np-body { gap: 30px; padding-inline: 28px; }
   .np-cover-wrap { width: min(300px, 34vw); }
-  .player { grid-template-columns: minmax(160px, 0.9fr) minmax(280px, 1.4fr) minmax(150px, 0.7fr); gap: 12px; }
+  .player { grid-template-columns: minmax(160px, 1fr) minmax(280px, 1.4fr) minmax(150px, 1fr); gap: 12px; }
   .volume { display: none; }
 }
 
