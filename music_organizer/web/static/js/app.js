@@ -2183,9 +2183,9 @@ function renderSettings() {
           <div class="settings-note" style="margin-bottom:10px">曲库内嵌歌词：<b>${(stats.total || 0) - (stats.missing_lyrics || 0)} / ${stats.total || 0}</b> 首（${lyricsCoverage}%）。下面的 126 等数字是外置 .lrc 文件数量，不是曲库歌词总数。</div>
           <div id="lrcSummary" class="lrc-summary"><div class="lrc-loading">正在检查 .lrc 文件…</div></div>
           <div class="lrc-options">
-            <label class="checkline"><input type="checkbox" id="lrcStatusRedundant" checked> 已有内嵌歌词（可安全清理）</label>
-            <label class="checkline"><input type="checkbox" id="lrcStatusOrphan" checked> 没有对应音频（可安全清理）</label>
-            <label class="checkline warn"><input type="checkbox" id="lrcStatusSidecarOnly"> 仅外置歌词（删除后该曲将没有歌词）</label>
+            <label class="checkline"><input type="checkbox" id="lrcStatusRedundant" checked> 已有内嵌歌词的 .lrc（可安全清理）</label>
+            <label class="checkline"><input type="checkbox" id="lrcStatusOrphan" checked> 没有对应音频的 .lrc（可安全清理）</label>
+            <label class="checkline warn"><input type="checkbox" id="lrcStatusSidecarOnly"> 仅外置 .lrc（删除后该曲将没有歌词）</label>
           </div>
           <div style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap">
             <button class="btn btn-ghost btn-sm" data-action="lrc-scan">重新扫描</button>
@@ -2337,10 +2337,10 @@ function lrcSummaryHtml() {
   const c = data.counts || {};
   const inst = (state.overview && state.overview.stats && state.overview.stats.instrumental) || 0;
   return `
-    <div class="lrc-stat"><span class="num">${c.total || 0}</span><span class="lbl">全部 .lrc</span><span class="hint">${fmtSize(c.size)}</span></div>
-    <div class="lrc-stat ok"><span class="num">${c.redundant || 0}</span><span class="lbl">已有内嵌</span><span class="hint">${inst ? '另有 ' + inst + ' 首纯音乐' : '可安全清理'}</span></div>
-    <div class="lrc-stat warn"><span class="num">${c.orphan || 0}</span><span class="lbl">失联歌词</span><span class="hint">没有对应音频</span></div>
-    <div class="lrc-stat ${c.sidecar_only ? 'danger' : ''}"><span class="num">${c.sidecar_only || 0}</span><span class="lbl">仅外置</span><span class="hint">删除会丢歌词</span></div>`;
+    <div class="lrc-stat"><span class="num">${c.total || 0}</span><span class="lbl">.lrc 文件总数</span><span class="hint">${fmtSize(c.size)}</span></div>
+    <div class="lrc-stat ok"><span class="num">${c.redundant || 0}</span><span class="lbl">冗余 .lrc</span><span class="hint">${inst ? '另有 ' + inst + ' 首纯音乐' : '音频内已有歌词，可安全清理'}</span></div>
+    <div class="lrc-stat warn"><span class="num">${c.orphan || 0}</span><span class="lbl">失联 .lrc</span><span class="hint">找不到对应音频文件</span></div>
+    <div class="lrc-stat ${c.sidecar_only ? 'danger' : ''}"><span class="num">${c.sidecar_only || 0}</span><span class="lbl">仅外置 .lrc</span><span class="hint">删除后该曲目将没有歌词</span></div>`;
 }
 
 function updateLrcSummary() {
