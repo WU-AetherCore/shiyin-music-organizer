@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import ctypes
+import json
 import os
 import shutil
 import socket
@@ -20,7 +21,7 @@ from pathlib import Path
 
 APP_NAME = "拾音"
 MUTEX_NAME = "Local\\ShiyinMusicOrganizerDesktop"
-APP_VERSION = "1.3.40"
+APP_VERSION = "1.3.41"
 FIXED_PORT = 8765
 
 if not getattr(sys, "frozen", False):
@@ -155,6 +156,95 @@ def darken_titlebar(process_id: int, timeout: float = 12.0) -> bool:
     return False
 
 
+def find_app_window(process_id: int):
+    """优先按 Edge 主进程找，找不到时按拾音窗口标题兜底。"""
+    handles = find_edge_window(process_id)
+    if handles:
+        return handles
+    found = []
+    user32 = ctypes.windll.user32
+    callback_type = ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_void_p, ctypes.c_void_p)
+
+    def callback(hwnd, _lparam):
+        if not user32.IsWindowVisible(hwnd):
+            return True
+        length = user32.GetWindowTextLengthW(hwnd)
+        if not length:
+            return True
+        text = ctypes.create_unicode_buffer(length + 1)
+        user32.GetWindowTextW(hwnd, text, length + 1)
+        if text.value.strip() in ("本地音乐整理小插件", "拾音"):
+            found.append(hwnd)
+        return True
+
+    user32.EnumWindows(callback_type(callback), 0)
+    return found
+
+
+class WINDOWPLACEMENT(ctypes.Structure):
+    _fields_ = [
+        ("length", ctypes.c_uint),
+        ("flags", ctypes.c_uint),
+        ("showCmd", ctypes.c_uint),
+        ("ptMinPosition", ctypes.c_long * 2),
+        ("ptMaxPosition", ctypes.c_long * 2),
+        ("rcNormalPosition", ctypes.c_long * 4),
+    ]
+
+
+def window_state_path() -> Path:
+    return data_root() / "window-state.json"
+
+
+def load_window_state() -> dict:
+    try:
+        raw = json.loads(window_state_path().read_text(encoding="utf-8"))
+        width = max(900, min(6000, int(raw.get("width", 1440))))
+        height = max(650, min(4000, int(raw.get("height", 900))))
+        return {
+            "x": int(raw.get("x", 120)),
+            "y": int(raw.get("y", 60)),
+            "width": width,
+            "height": height,
+            "maximized": bool(raw.get("maximized", False)),
+        }
+    except Exception:
+        return {"x": 120, "y": 60, "width": 1440, "height": 900, "maximized": False}
+
+
+def read_window_snapshot(process_id: int):
+    handles = find_app_window(process_id)
+    if not handles:
+        return None
+    hwnd = handles[0]
+    placement = WINDOWPLACEMENT()
+    placement.length = ctypes.sizeof(WINDOWPLACEMENT)
+    if not ctypes.windll.user32.GetWindowPlacement(hwnd, ctypes.byref(placement)):
+        return None
+    left, top, right, bottom = placement.rcNormalPosition
+    width, height = right - left, bottom - top
+    if width < 500 or height < 400:
+        return None
+    return {
+        "x": left,
+        "y": top,
+        "width": width,
+        "height": height,
+        "maximized": placement.showCmd == 3,
+    }
+
+
+def save_window_state(state: dict) -> None:
+    try:
+        path = window_state_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temp = path.with_suffix(".tmp")
+        temp.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
+        temp.replace(path)
+    except Exception:
+        log("save window state failed\n" + traceback.format_exc())
+
+
 def run() -> int:
     if not single_instance():
         message_box("拾音已经在运行，请切换到已打开的窗口。")
@@ -210,7 +300,7 @@ def run() -> int:
     if override_profile:
         profile = Path(override_profile)
     else:
-        profile = Path(os.environ.get("LOCALAPPDATA") or data_root()) / "MusicOrganizer" / "edge-profile"
+        profile = Path(os.environ.get("LOCALAPPDATA") or data_root()) / "MusicOrganizer" / "edge-profile-v2"
     try:
         profile.mkdir(parents=True, exist_ok=True)
     except OSError:
@@ -218,21 +308,24 @@ def run() -> int:
         message_box("无法创建浏览器配置目录，请检查磁盘权限：\n" + str(profile), error=True)
         server.close()
         return 1
+    window_state = load_window_state()
+    log("window state " + json.dumps(window_state, ensure_ascii=False))
     args = [
         edge,
-        f"--app={url}/?desktop=1",
+        f"--app={url}/",
         f"--user-data-dir={profile}",
         "--no-first-run",
         "--no-default-browser-check",
         "--disable-background-mode",
         "--disable-sync",
         "--force-dark-mode",
-        "--kiosk",
-        "--disable-features=Translate,MediaRouter,OptimizationHints,msEdgeIdentity,msEdgeSync,EdgeSync,Windows11CustomTitlebar,Windows10CustomTitlebar",
         "--no-service-autorun",
-        "--window-size=1440,900",
-        "--window-position=120,60",
+        "--disable-features=Translate,MediaRouter,OptimizationHints,msEdgeIdentity,msEdgeSync,EdgeSync",
+        f"--window-size={window_state['width']},{window_state['height']}",
+        f"--window-position={window_state['x']},{window_state['y']}",
     ]
+    if window_state.get("maximized"):
+        args.append("--start-maximized")
     log("edge launch " + " ".join(args))
     try:
         proc = subprocess.Popen(args)
@@ -242,6 +335,16 @@ def run() -> int:
             stderr=subprocess.DEVNULL,
             creationflags=0x08000000,
         )
+        last_window = {"state": None}
+
+        def watch_window() -> None:
+            while proc.poll() is None:
+                snapshot = read_window_snapshot(proc.pid)
+                if snapshot:
+                    last_window["state"] = snapshot
+                time.sleep(0.5)
+
+        threading.Thread(target=watch_window, name="shiyin-window", daemon=True).start()
         darken_titlebar(proc.pid)
     except Exception:
         log("edge launch failed\n" + traceback.format_exc())
@@ -254,6 +357,10 @@ def run() -> int:
         proc.wait()
     except KeyboardInterrupt:
         pass
+    final_state = read_window_snapshot(proc.pid) or last_window.get("state")
+    if final_state:
+        save_window_state(final_state)
+        log("window state saved " + json.dumps(final_state, ensure_ascii=False))
     log("edge closed")
     try:
         app.config["MORG_AUTOMATION"].stop()
