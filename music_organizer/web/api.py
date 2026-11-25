@@ -449,6 +449,15 @@ def list_tracks():
     )
 
 
+@bp.post("/desktop/close")
+def desktop_close():
+    close = current_app.config.get("MORG_DESKTOP_CLOSE")
+    if not close:
+        raise ApiError("当前不是桌面模式")
+    close()
+    return jsonify({"ok": True})
+
+
 @bp.get("/tracks/<int:track_id>")
 def track_detail(track_id: int):
     track = _track_or_404(track_id)

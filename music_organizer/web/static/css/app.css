@@ -1513,3 +1513,8 @@ body:not(.is-playing) .np-cover-wrap.spin-cover .np-cover { animation-play-state
 
 /* 底部迷你播放器不再显示频谱；频谱只保留在歌词/全屏播放页 */
 .player-eq, #pbEq { display: none !important; }
+
+/* 桌面全屏模式自定义关闭按钮 */
+.desktop-close { display: none; position: fixed; top: 8px; right: 10px; z-index: 9999; width: 30px; height: 30px; border-radius: 8px; border: 1px solid rgba(255,255,255,.16); background: rgba(7,11,20,.75); color: #dfe6ff; font-size: 20px; line-height: 1; cursor: pointer; backdrop-filter: blur(8px); }
+.desktop-close:hover { color: #fff; background: rgba(210,55,90,.8); border-color: transparent; }
+body.desktop-shell .desktop-close { display: grid; place-items: center; }

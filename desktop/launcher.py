@@ -113,6 +113,48 @@ def find_edge() -> str:
     return ""
 
 
+def find_edge_window(process_id: int):
+    handles = []
+    user32 = ctypes.windll.user32
+    callback_type = ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_void_p, ctypes.c_void_p)
+
+    def callback(hwnd, _lparam):
+        pid = ctypes.c_ulong()
+        user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+        if pid.value == process_id and user32.IsWindowVisible(hwnd) and user32.GetWindowTextLengthW(hwnd) > 0:
+            handles.append(hwnd)
+        return True
+
+    user32.EnumWindows(callback_type(callback), 0)
+    return handles
+
+
+def darken_titlebar(process_id: int, timeout: float = 12.0) -> bool:
+    """把 Edge 应用窗口的 Windows 标题栏改成与软件背景一致的深色。"""
+    deadline = time.time() + timeout
+    applied = False
+    while time.time() < deadline:
+        for hwnd in find_edge_window(process_id):
+            try:
+                dwm = ctypes.windll.dwmapi
+                enabled = ctypes.c_int(1)
+                dwm.DwmSetWindowAttribute(hwnd, 20, ctypes.byref(enabled), ctypes.sizeof(enabled))
+                # Win11: 35 = caption color, 36 = text color, 34 = border color (COLORREF BGR)
+                caption = ctypes.c_uint32(0x00140B07)   # #070b14
+                text = ctypes.c_uint32(0x00F7F5FF)
+                border = ctypes.c_uint32(0x00281A0B)
+                dwm.DwmSetWindowAttribute(hwnd, 35, ctypes.byref(caption), ctypes.sizeof(caption))
+                dwm.DwmSetWindowAttribute(hwnd, 36, ctypes.byref(text), ctypes.sizeof(text))
+                dwm.DwmSetWindowAttribute(hwnd, 34, ctypes.byref(border), ctypes.sizeof(border))
+                applied = True
+            except Exception:
+                pass
+        if applied:
+            return True
+        time.sleep(0.25)
+    return False
+
+
 def run() -> int:
     if not single_instance():
         message_box("拾音已经在运行，请切换到已打开的窗口。")
@@ -178,20 +220,29 @@ def run() -> int:
         return 1
     args = [
         edge,
-        f"--app={url}/",
+        f"--app={url}/?desktop=1",
         f"--user-data-dir={profile}",
         "--no-first-run",
         "--no-default-browser-check",
         "--disable-background-mode",
         "--disable-sync",
+        "--force-dark-mode",
+        "--kiosk",
+        "--disable-features=Translate,MediaRouter,OptimizationHints,msEdgeIdentity,msEdgeSync,EdgeSync,Windows11CustomTitlebar,Windows10CustomTitlebar",
         "--no-service-autorun",
-        "--disable-features=Translate,MediaRouter,OptimizationHints,msEdgeIdentity,msEdgeSync,EdgeSync",
         "--window-size=1440,900",
         "--window-position=120,60",
     ]
     log("edge launch " + " ".join(args))
     try:
         proc = subprocess.Popen(args)
+        app.config["MORG_DESKTOP_CLOSE"] = lambda: subprocess.run(
+            ["taskkill", "/PID", str(proc.pid), "/T", "/F"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            creationflags=0x08000000,
+        )
+        darken_titlebar(proc.pid)
     except Exception:
         log("edge launch failed\n" + traceback.format_exc())
         message_box("无法启动 Edge 应用窗口，详情：" + str(data_root() / "logs" / "desktop.log"), error=True)

@@ -4456,6 +4456,15 @@ function bindEvents() {
 
 async function init() {
   bindEvents();
+  if (new URLSearchParams(location.search).get('desktop') === '1') {
+    document.body.classList.add('desktop-shell');
+    const closeButton = $('#desktopClose');
+    if (closeButton) {
+      closeButton.addEventListener('click', async () => {
+        try { await api('/api/desktop/close', { method: 'POST' }); } catch (err) { window.close(); }
+      });
+    }
+  }
   try {
     await loadOverview();
   } catch (err) {
