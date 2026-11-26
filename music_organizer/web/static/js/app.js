@@ -2702,12 +2702,18 @@ function syncCoverSpin() {
 function updatePlayModeUI() {
   const shuffleBtn = $('#pbShuffle');
   if (shuffleBtn) shuffleBtn.classList.toggle('active', state.shuffle);
+  const npShuffle = $('#npShuffle');
+  if (npShuffle) npShuffle.classList.toggle('active', state.shuffle);
   const repeatBtn = $('#pbRepeat');
   if (repeatBtn) {
     repeatBtn.classList.toggle('active', state.repeat !== 'off');
     repeatBtn.title = state.repeat === 'one' ? '单曲循环' : state.repeat === 'off' ? '不循环' : '列表循环';
     repeatBtn.style.opacity = state.repeat === 'off' ? '0.45' : '1';
   }
+  const npList = $('#npRepeatAll');
+  if (npList) npList.classList.toggle('active', state.repeat === 'list');
+  const npOne = $('#npRepeatOne');
+  if (npOne) npOne.classList.toggle('active', state.repeat === 'one');
 }
 
 const PLAYBACK_QUALITY_LABELS = {
@@ -2930,6 +2936,13 @@ function togglePlay() {
 
 function cycleRepeat() {
   state.repeat = state.repeat === 'list' ? 'one' : state.repeat === 'one' ? 'off' : 'list';
+  localStorage.setItem('morg.repeat', state.repeat);
+  updatePlayModeUI();
+  toast(state.repeat === 'one' ? '单曲循环' : state.repeat === 'off' ? '不循环' : '列表循环', 'ok', 1500);
+}
+
+function setRepeatMode(mode) {
+  state.repeat = state.repeat === mode ? 'off' : mode;
   localStorage.setItem('morg.repeat', state.repeat);
   updatePlayModeUI();
   toast(state.repeat === 'one' ? '单曲循环' : state.repeat === 'off' ? '不循环' : '列表循环', 'ok', 1500);
@@ -3728,6 +3741,12 @@ async function handleAction(action, el, event) {
       break;
     case 'cycle-repeat':
       cycleRepeat();
+      break;
+    case 'set-repeat-list':
+      setRepeatMode('list');
+      break;
+    case 'set-repeat-one':
+      setRepeatMode('one');
       break;
     case 'day-chip':
       el.classList.toggle('active');

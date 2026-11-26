@@ -919,6 +919,33 @@ body:not(.is-playing) .eq-bars { opacity: 0; }
 .np-progress .progress { flex: 1; }
 .np-controls { display: flex; align-items: center; justify-content: center; gap: 18px; position: relative; }
 .np-controls .icon-btn { width: 42px; height: 42px; }
+.np-mode-btn {
+  width: 52px; height: 52px; flex: none; border-radius: 16px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: 1px solid rgba(255,255,255,.10);
+  background: rgba(255,255,255,.045); color: rgba(225,232,255,.52);
+  cursor: pointer; transition: transform .18s ease, background .18s ease, color .18s ease, box-shadow .18s ease;
+}
+.np-mode-btn svg { width: 23px; height: 23px; }
+.np-mode-btn.np-shuffle { color: #65ffd0; border-color: rgba(60,255,190,.30); background: rgba(30,190,145,.10); }
+.np-mode-btn.np-repeat-all { color: #b5a7ff; border-color: rgba(150,125,255,.32); background: rgba(105,80,255,.12); }
+.np-mode-btn.np-repeat-one { color: #ffc080; border-color: rgba(255,170,90,.32); background: rgba(255,135,60,.11); }
+.np-mode-btn:hover { transform: translateY(-2px); background: rgba(255,255,255,.075); color: #fff; }
+.np-mode-btn.np-shuffle.active {
+  color: #05251b; border-color: rgba(74,255,190,.8);
+  background: linear-gradient(135deg, #67ffd0, #25d9a0);
+  box-shadow: 0 0 24px rgba(45,235,170,.48), inset 0 1px 0 rgba(255,255,255,.5);
+}
+.np-mode-btn.np-repeat-all.active {
+  color: #fff; border-color: rgba(164,144,255,.9);
+  background: linear-gradient(135deg, #8e76ff, #5b45ef);
+  box-shadow: 0 0 24px rgba(112,82,255,.55), inset 0 1px 0 rgba(255,255,255,.4);
+}
+.np-mode-btn.np-repeat-one.active {
+  color: #2b1302; border-color: rgba(255,196,120,.95);
+  background: linear-gradient(135deg, #ffd08a, #ff8a3d);
+  box-shadow: 0 0 24px rgba(255,145,60,.55), inset 0 1px 0 rgba(255,255,255,.5);
+}
 .np-volume { position: absolute; right: 0; top: 50%; transform: translateY(-50%); display: flex; align-items: center; gap: 8px; color: var(--dim); }
 .np-volume svg { width: 17px; height: 17px; flex: none; }
 .np-volume input { width: 96px; accent-color: var(--accent-2); cursor: pointer; }

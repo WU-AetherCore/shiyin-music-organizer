@@ -197,5 +197,12 @@ def create_app(
             return jsonify({"ok": False, "error": f"服务器错误：{exc}"}), 500
         return render_template("500.html", version=__version__, error=str(exc)), 500
 
+    @app.after_request
+    def no_cache_html(response):
+        if response.mimetype == "text/html":
+            response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
+            response.headers["Pragma"] = "no-cache"
+        return response
+
     log.info("Web 应用已创建：music_dir=%s", config.music_dir_str or "(未设置)")
     return app

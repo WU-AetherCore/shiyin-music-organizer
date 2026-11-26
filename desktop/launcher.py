@@ -390,7 +390,7 @@ def run() -> int:
     log("window state " + json.dumps(window_state, ensure_ascii=False))
     args = [
         edge,
-        f"--app={url}/",
+        f"--app={url}/?desktop={APP_VERSION}-{int(time.time())}",
         f"--user-data-dir={profile}",
         "--no-first-run",
         "--no-default-browser-check",
