@@ -122,8 +122,14 @@ def find_edge_window(process_id: int):
     def callback(hwnd, _lparam):
         pid = ctypes.c_ulong()
         user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
-        if pid.value == process_id and user32.IsWindowVisible(hwnd) and user32.GetWindowTextLengthW(hwnd) > 0:
-            handles.append(hwnd)
+        if pid.value != process_id or not user32.IsWindowVisible(hwnd):
+            return True
+        length = user32.GetWindowTextLengthW(hwnd)
+        if length:
+            text = ctypes.create_unicode_buffer(length + 1)
+            user32.GetWindowTextW(hwnd, text, length + 1)
+            if is_app_window_title(text.value):
+                handles.append(hwnd)
         return True
 
     user32.EnumWindows(callback_type(callback), 0)
@@ -279,10 +285,48 @@ def stop_app_edge(profile: Path) -> None:
         log("stop app edge failed\n" + traceback.format_exc())
 
 
+def focus_existing_window() -> bool:
+    handles = find_app_window(0)
+    if not handles:
+        return False
+    user32 = ctypes.windll.user32
+    hwnd = handles[0]
+    try:
+        user32.ShowWindow(hwnd, 9)  # SW_RESTORE
+        user32.SetForegroundWindow(hwnd)
+    except Exception:
+        pass
+    return True
+
+
+def kill_other_instances() -> None:
+    """清理没有可见窗口、但仍占着后端/单实例锁的旧进程。"""
+    try:
+        script = (
+            "$self = " + str(os.getpid()) + "; "
+            "Get-Process -Name ShiyinMusicOrganizer -ErrorAction SilentlyContinue | "
+            "Where-Object { $_.Id -ne $self } | "
+            "Stop-Process -Force -ErrorAction SilentlyContinue"
+        )
+        subprocess.run(
+            ["powershell", "-NoProfile", "-NonInteractive", "-Command", script],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            creationflags=0x08000000,
+            timeout=10,
+        )
+    except Exception:
+        log("kill stale instances failed\n" + traceback.format_exc())
+
+
 def run() -> int:
     if not single_instance():
-        message_box("拾音已经在运行，请切换到已打开的窗口。")
-        return 0
+        if focus_existing_window():
+            log("existing window focused")
+            return 0
+        log("stale instance without window; terminating it")
+        kill_other_instances()
+        time.sleep(1.0)
     ensure_ffmpeg()
     log(f"launcher start version={APP_VERSION} frozen={getattr(sys, 'frozen', False)}")
 
