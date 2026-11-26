@@ -807,12 +807,12 @@ function renderArtists() {
     $('#view').innerHTML = `
       <div class="artist-page">
         <div class="artist-hero">
-          <div class="artist-hero-bg" style="background-image:url('${esc(artist.cover_url)}')"></div>
+          <div class="artist-hero-bg" style="background-image:url('${esc(artist.image_url || artist.cover_url)}')"></div>
           <div class="artist-hero-glow"></div>
           <div class="artist-hero-inner">
             <button class="artist-back" data-action="artist-back">← 返回歌手</button>
             <div class="artist-hero-main">
-              <div class="artist-avatar"><img src="${esc(artist.cover_url)}" alt=""></div>
+              <div class="artist-avatar"><img src="${esc(artist.image_url || artist.cover_url)}" data-artist-image="${esc(artist.name)}" data-cover="${esc(artist.cover_url)}" ${artist.image_url ? 'data-loaded="1"' : ''} onerror="this.src=this.dataset.cover" alt=""></div>
               <div class="artist-hero-copy">
                 <div class="artist-kicker">ARTIST</div>
                 <h1>${esc(artist.name)}</h1>
@@ -824,11 +824,12 @@ function renderArtists() {
         <div class="artist-tabs-row">${tabs}</div>
         ${body}
       </div>`;
+    loadArtistImages();
     return;
   }
   const cards = (a.items || []).map((artist) => `
     <button class="artist-card" data-action="artist-open" data-name="${esc(artist.name)}">
-      <div class="artist-card-img"><img src="${esc(artist.cover_url)}" alt=""><span class="artist-card-ring"></span></div>
+      <div class="artist-card-img"><img src="${esc(artist.image_url || artist.cover_url)}" data-artist-image="${esc(artist.name)}" data-cover="${esc(artist.cover_url)}" ${artist.image_url ? 'data-loaded="1"' : ''} onerror="this.src=this.dataset.cover" alt=""><span class="artist-card-ring"></span></div>
       <b>${esc(artist.name)}</b>
       <span>${artist.track_count || 0} 首 · ${artist.album_count || 0} 张专辑</span>
     </button>`).join('');
@@ -837,6 +838,36 @@ function renderArtists() {
       <div class="artists-head"><div><div class="artist-kicker">ARTISTS</div><h1>歌手</h1><p>${(a.items || []).length} 位歌手 · 按歌曲数量排序</p></div></div>
       <div class="artist-grid">${cards || `<div class="empty-note">${a.loading ? '正在加载歌手…' : '还没有歌手'}</div>`}</div>
     </div>`;
+  loadArtistImages();
+}
+
+function loadArtistImages() {
+  const images = $$('img[data-artist-image]');
+  const load = async (img) => {
+    if (img.dataset.loaded) return;
+    img.dataset.loaded = '1';
+    try {
+      const result = await api('/api/artist-image?name=' + encodeURIComponent(img.dataset.artistImage));
+      if (result && result.url) img.src = result.url;
+    } catch (err) {
+      // 接口失败时保留歌曲封面作为头像
+    }
+  };
+  if (!('IntersectionObserver' in window)) {
+    images.forEach(load);
+    return;
+  }
+  const observer = new IntersectionObserver((entries) => {
+    entries.forEach((entry) => {
+      if (entry.isIntersecting) {
+        observer.unobserve(entry.target);
+        load(entry.target);
+      }
+    });
+  }, { rootMargin: '160px' });
+  images.forEach((img) => {
+    if (!img.dataset.loaded) observer.observe(img);
+  });
 }
 
 function dailyDateString() {

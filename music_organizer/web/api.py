@@ -28,6 +28,7 @@ from ..providers import (
 from ..repair import RepairService, track_display
 from ..matcher import build_query
 from ..providers import reset_breakers
+from ..artists import artist_cover, artist_key, fetch_artist_image, group_artist_tracks, load_image_cache
 from ..textutil import (
     clean_placeholder,
     format_duration,
@@ -166,6 +167,7 @@ def _overview_payload() -> Dict[str, Any]:
     cfg = _cfg()
     paths = _paths()
     stats = db.stats(paths)
+    stats["artists"] = len(group_artist_tracks(db.all_tracks(paths)))
     filters = db.filter_counts(paths)
     duplicates = db.find_duplicates(paths=paths)
     auto = _automation()
@@ -353,45 +355,51 @@ def _duplicate_ids() -> List[int]:
 def list_artists():
     query = request.args.get("q", "").strip().casefold()
     tracks = db.all_tracks(_paths())
-    groups: Dict[str, Dict[str, Any]] = {}
-    for track in tracks:
-        name = str(track.get("artist") or "未知歌手").strip() or "未知歌手"
+    groups = group_artist_tracks(tracks)
+    images = load_image_cache(_paths())
+    items = []
+    for key, group in groups.items():
+        name = group["name"]
         if query and query not in name.casefold():
             continue
-        item = groups.get(name)
-        if item is None:
-            data = track_json(track)
-            item = {
-                "name": name,
-                "cover_url": data.get("cover_url") or "",
-                "track_count": 0,
-                "album_count": 0,
-                "duration": 0,
-                "albums": {},
-            }
-            groups[name] = item
-        item["track_count"] += 1
-        item["duration"] += float(track.get("duration") or 0)
-        album_name = str(track.get("album") or "未知专辑").strip() or "未知专辑"
-        album = item["albums"].get(album_name)
-        if album is None:
-            album = {
-                "name": album_name,
-                "year": track.get("year") or "",
-                "cover_url": track_json(track).get("cover_url") or "",
-                "track_count": 0,
-            }
-            item["albums"][album_name] = album
-        album["track_count"] += 1
-    items = []
-    for item in groups.values():
-        albums = sorted(item.pop("albums").values(), key=lambda album: (str(album.get("year") or ""), album["name"]))
-        item["album_count"] = len(albums)
-        item["albums"] = albums
-        item["duration_text"] = format_duration(item.pop("duration", 0))
+        first = group["tracks"][0]
+        data = track_json(first)
+        albums: Dict[str, Dict[str, Any]] = {}
+        duration = 0.0
+        for track in group["tracks"]:
+            duration += float(track.get("duration") or 0)
+            album_name = str(track.get("album") or "未知专辑").strip() or "未知专辑"
+            album = albums.get(album_name)
+            if album is None:
+                album = {
+                    "name": album_name,
+                    "year": track.get("year") or "",
+                    "cover_url": track_json(track).get("cover_url") or "",
+                    "track_count": 0,
+                }
+                albums[album_name] = album
+            album["track_count"] += 1
+        item = {
+            "name": name,
+            "cover_url": data.get("cover_url") or "",
+            "image_url": images.get(key, ""),
+            "track_count": len(group["tracks"]),
+            "album_count": len(albums),
+            "duration": duration,
+            "duration_text": format_duration(duration),
+            "albums": sorted(albums.values(), key=lambda album: (str(album.get("year") or ""), album["name"])),
+        }
         items.append(item)
     items.sort(key=lambda item: (-item["track_count"], item["name"]))
     return jsonify({"ok": True, "items": items, "total": len(items)})
+
+
+@bp.get("/artist-image")
+def artist_image():
+    name = request.args.get("name", "").strip()
+    if not name:
+        raise ApiError("缺少歌手名")
+    return jsonify({"ok": True, "url": fetch_artist_image(name, _paths())})
 
 
 @bp.get("/artist")
@@ -399,9 +407,12 @@ def artist_detail():
     name = request.args.get("name", "").strip()
     if not name:
         raise ApiError("缺少歌手名")
-    tracks = [t for t in db.all_tracks(_paths()) if (t.get("artist") or "未知歌手").strip() == name]
-    if not tracks:
+    groups = group_artist_tracks(db.all_tracks(_paths()))
+    group = groups.get(artist_key(name))
+    if group is None:
         return jsonify({"ok": False, "error": "找不到这个歌手"}), 404
+    name = group["name"]
+    tracks = group["tracks"]
     data = track_json(tracks[0])
     albums: Dict[str, Dict[str, Any]] = {}
     songs = []
@@ -421,12 +432,14 @@ def artist_detail():
             albums[album_name] = album
         album["track_count"] += 1
         album["tracks"].append(song)
+    images = load_image_cache(_paths())
     return jsonify(
         {
             "ok": True,
             "artist": {
                 "name": name,
                 "cover_url": data.get("cover_url") or "",
+                "image_url": images.get(group["key"], ""),
                 "track_count": len(tracks),
                 "album_count": len(albums),
                 "tracks": songs,
