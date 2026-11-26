@@ -843,18 +843,25 @@ function renderArtists() {
 
 function loadArtistImages() {
   const images = $$('img[data-artist-image]');
-  const load = async (img) => {
+  const load = async (img, attempt = 0) => {
     if (img.dataset.loaded) return;
     img.dataset.loaded = '1';
     try {
       const result = await api('/api/artist-image?name=' + encodeURIComponent(img.dataset.artistImage));
-      if (result && result.url) img.src = result.url;
+      if (result && result.url) {
+        img.src = result.url;
+      } else if (attempt < 1) {
+        setTimeout(() => {
+          img.dataset.loaded = '';
+          load(img, attempt + 1);
+        }, 3200);
+      }
     } catch (err) {
       // 接口失败时保留歌曲封面作为头像
     }
   };
   if (!('IntersectionObserver' in window)) {
-    images.forEach(load);
+    images.forEach((img) => load(img));
     return;
   }
   const observer = new IntersectionObserver((entries) => {

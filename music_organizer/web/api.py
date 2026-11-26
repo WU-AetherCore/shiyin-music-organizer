@@ -28,7 +28,16 @@ from ..providers import (
 from ..repair import RepairService, track_display
 from ..matcher import build_query
 from ..providers import reset_breakers
-from ..artists import artist_cover, artist_key, fetch_artist_image, group_artist_tracks, load_image_cache
+from ..artists import (
+    artist_cover,
+    artist_key,
+    cached_artist_image,
+    fetch_artist_image,
+    group_artist_tracks,
+    load_image_cache,
+    prefetch_artist_image,
+)
+import threading
 from ..textutil import (
     clean_placeholder,
     format_duration,
@@ -390,7 +399,16 @@ def artist_image():
     name = request.args.get("name", "").strip()
     if not name:
         raise ApiError("缺少歌手名")
-    return jsonify({"ok": True, "url": fetch_artist_image(name, _paths())})
+    image = cached_artist_image(name, _paths())
+    if not image:
+        # 不在请求线程里等网易云；后台抓取，避免拖慢歌手详情接口。
+        threading.Thread(
+            target=prefetch_artist_image,
+            args=(name, _paths()),
+            name="artist-image-prefetch",
+            daemon=True,
+        ).start()
+    return jsonify({"ok": True, "url": image})
 
 
 @bp.get("/artist")

@@ -14,6 +14,8 @@ from .paths import AppPaths
 from .textutil import clean_spaces, normalize_key, to_simplified
 
 _CACHE_LOCK = threading.Lock()
+_PREFETCH_LOCK = threading.Lock()
+_PREFETCH: set = set()
 
 
 def display_artist(name: str) -> str:
@@ -97,6 +99,26 @@ def _save_image_cache(paths: AppPaths, data: Dict[str, str]) -> None:
         temp.replace(path)
     except Exception:
         pass
+
+
+def cached_artist_image(name: str, paths: AppPaths) -> str:
+    key = artist_key(name)
+    return load_image_cache(paths).get(key, "") if key else ""
+
+
+def prefetch_artist_image(name: str, paths: AppPaths) -> None:
+    key = artist_key(name)
+    if not key:
+        return
+    with _PREFETCH_LOCK:
+        if key in _PREFETCH:
+            return
+        _PREFETCH.add(key)
+    try:
+        fetch_artist_image(name, paths)
+    finally:
+        with _PREFETCH_LOCK:
+            _PREFETCH.discard(key)
 
 
 def fetch_artist_image(name: str, paths: AppPaths) -> str:
