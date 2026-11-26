@@ -2589,13 +2589,14 @@ function buildEqBars() {
     root.innerHTML = '';
     for (let i = 0; i < count; i += 1) {
       const bar = document.createElement('span');
-      bar.style.animationDelay = `${(i % 7) * -0.12}s`;
-      bar.style.animationDuration = `${0.72 + ((i * 37) % 50) / 100}s`;
+      bar.style.height = '3px';
+      bar.style.opacity = '0.4';
       root.appendChild(bar);
     }
   };
-  make($('#pbEq'), 44);
-  make($('#npEq'), 60);
+  const count = window.innerWidth < 560 ? 40 : 56;
+  make($('#pbEq'), count);
+  make($('#npEq'), count);
 }
 
 function showPlayerBar() {
@@ -2623,8 +2624,9 @@ function initAudioAnalyser() {
     state.audioCtx = new Ctx();
     state.audioSource = state.audioCtx.createMediaElementSource(audio);
     state.audioAnalyser = state.audioCtx.createAnalyser();
-    state.audioAnalyser.fftSize = 128;
-    state.audioAnalyser.smoothingTimeConstant = 0.78;
+    // 与 Aether-Core 相同的 FFT 与平滑参数
+    state.audioAnalyser.fftSize = 256;
+    state.audioAnalyser.smoothingTimeConstant = 0.72;
     state.audioSource.connect(state.audioAnalyser);
     state.audioAnalyser.connect(state.audioCtx.destination);
   } catch (err) {
@@ -2638,9 +2640,8 @@ function stopEq() {
   cancelAnimationFrame(state.eqRaf);
   state.eqRaf = 0;
   $$('.eq-bars span').forEach((bar) => {
-    bar.style.transform = 'scaleY(0.22)';
-    bar.style.opacity = '';
-    bar.style.background = '';
+    bar.style.height = '3px';
+    bar.style.opacity = '0.4';
   });
 }
 
@@ -2650,31 +2651,45 @@ function startEq() {
   if (state.audioCtx.state === 'suspended') state.audioCtx.resume().catch(() => {});
   cancelAnimationFrame(state.eqRaf);
   const analyser = state.audioAnalyser;
-  const buffer = analyser ? new Uint8Array(analyser.frequencyBinCount) : null;
+  if (!analyser) return;
+  const data = new Uint8Array(analyser.frequencyBinCount);
   const roots = $$('.eq-bars');
-  roots.forEach((root) => root.classList.add('eq-live'));
-  const frames = (now) => {
+  const mobile = window.innerWidth < 560;
+  let frame = 0;
+  const tick = () => {
     if (audio.paused) { stopEq(); return; }
-    if (analyser && buffer) analyser.getByteFrequencyData(buffer);
+    analyser.getByteFrequencyData(data);
+    const t = performance.now() / 1000;
+    frame += 1;
     roots.forEach((root) => {
       const bars = root.querySelectorAll('span');
-      bars.forEach((bar, index) => {
-        const sourceIndex = buffer ? Math.min(buffer.length - 1, Math.floor((index / Math.max(1, bars.length - 1)) * (buffer.length * 0.72))) : 0;
-        const spectrum = buffer ? buffer[sourceIndex] / 255 : 0;
-        const wave = 0.5 + 0.5 * Math.sin((now || 0) / 230 + index * 0.72);
-        // 灵敏度约为上一版的 40%，保持动态但不会频繁顶满。
-        const boosted = Math.min(1, Math.pow(Math.max(0, spectrum), 0.70) * 0.62);
-        const energy = Math.max(boosted, wave * 0.16);
-        const hue = (index * 37 + (now || 0) / 38 + energy * 105) % 360;
-        const scale = Math.min(1, 0.08 + energy * 0.90);
-        bar.style.transform = `scaleY(${scale.toFixed(3)})`;
-        bar.style.opacity = (0.62 + energy * 0.38).toFixed(2);
-        bar.style.background = `linear-gradient(180deg, hsl(${hue.toFixed(0)} 96% 70%), hsl(${((hue + 42) % 360).toFixed(0)} 90% 52%))`;
+      if (!bars.length) return;
+      const bottom = root.id === 'pbEq';
+      const maxH = bottom ? 34 : (mobile ? 27 : 37);
+      const center = (bars.length - 1) / 2;
+      const recolor = frame % 6 === 0;
+      const rawValues = [];
+      bars.forEach((bar, i) => {
+        const d = center <= 0 ? 0 : Math.abs(i - center) / center;
+        const idx = Math.floor(Math.pow(1 - d, 0.7) * (data.length - 1));
+        const weight = 0.5 + 0.5 * (1 - d);
+        rawValues.push((data[idx] / 255) * weight);
+      });
+      const peak = Math.max(0.001, ...rawValues);
+      const gain = Math.min(4.5, 0.9 / peak);
+      bars.forEach((bar, i) => {
+        const value = Math.min(1, rawValues[i] * gain);
+        bar.style.height = `${(3 + value * maxH).toFixed(1)}px`;
+        bar.style.opacity = (0.55 + value * 0.45).toFixed(2);
+        if (recolor) {
+          const hue = (t * 90 + i * (360 / bars.length)) % 360;
+          bar.style.background = `linear-gradient(180deg,hsl(${hue.toFixed(0)},100%,72%),hsl(${((hue + 45) % 360).toFixed(0)},100%,52%))`;
+        }
       });
     });
-    state.eqRaf = requestAnimationFrame(frames);
+    state.eqRaf = requestAnimationFrame(tick);
   };
-  state.eqRaf = requestAnimationFrame(frames);
+  tick();
 }
 
 function syncCoverSpin() {
