@@ -2647,18 +2647,16 @@ function stopEq() {
 
 function startEq() {
   initAudioAnalyser();
-  if (!state.audioCtx) return;
-  if (state.audioCtx.state === 'suspended') state.audioCtx.resume().catch(() => {});
+  if (state.audioCtx && state.audioCtx.state === 'suspended') state.audioCtx.resume().catch(() => {});
   cancelAnimationFrame(state.eqRaf);
   const analyser = state.audioAnalyser;
-  if (!analyser) return;
-  const data = new Uint8Array(analyser.frequencyBinCount);
+  const data = analyser ? new Uint8Array(analyser.frequencyBinCount) : null;
   const roots = $$('.eq-bars');
   const mobile = window.innerWidth < 560;
   let frame = 0;
   const tick = () => {
     if (audio.paused) { stopEq(); return; }
-    analyser.getByteFrequencyData(data);
+    if (analyser && data) analyser.getByteFrequencyData(data);
     const t = performance.now() / 1000;
     frame += 1;
     roots.forEach((root) => {
@@ -2671,9 +2669,20 @@ function startEq() {
       const rawValues = [];
       bars.forEach((bar, i) => {
         const d = center <= 0 ? 0 : Math.abs(i - center) / center;
-        const idx = Math.floor(Math.pow(1 - d, 0.7) * (data.length - 1));
+        const idx = data ? Math.floor(Math.pow(1 - d, 0.7) * (data.length - 1)) : 0;
         const weight = 0.5 + 0.5 * (1 - d);
-        rawValues.push((data[idx] / 255) * weight);
+        rawValues.push(data ? (data[idx] / 255) * weight : 0);
+      });
+      const measuredPeak = Math.max(...rawValues);
+      bars.forEach((bar, i) => {
+        const d = center <= 0 ? 0 : Math.abs(i - center) / center;
+        const wave = 0.5 + 0.5 * Math.sin(t * 2.35 + i * 0.58);
+        const idleWave = (0.16 + 0.22 * wave) * (0.55 + 0.45 * (1 - d));
+        if (!data || measuredPeak < 0.05) {
+          rawValues[i] = idleWave;
+        } else {
+          rawValues[i] = Math.max(rawValues[i], idleWave * 0.72);
+        }
       });
       const peak = Math.max(0.001, ...rawValues);
       const gain = Math.min(4.5, 0.9 / peak);
@@ -2699,21 +2708,45 @@ function syncCoverSpin() {
   wrap.title = state.coverSpin ? '点击恢复方形封面' : '点击切换圆形旋转封面';
 }
 
+const PLAY_MODE_ICONS = {
+  shuffle: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h3c4 0 5 10 10 10h3"/><path d="M17 4l3 3-3 3"/><path d="M4 17h3c1.2 0 2.2-.4 3-1.1"/><path d="M14 8.1c1-.7 2-1.1 3-1.1h3"/><path d="M17 14l3 3-3 3"/></svg>',
+  list: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3l3 3-3 3"/><path d="M4 8V7a3 3 0 0 1 3-3h13"/><path d="M7 21l-3-3 3-3"/><path d="M20 16v1a3 3 0 0 1-3 3H4"/></svg>',
+  one: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3l3 3-3 3"/><path d="M4 8V7a3 3 0 0 1 3-3h13"/><path d="M7 21l-3-3 3-3"/><path d="M20 16v1a3 3 0 0 1-3 3H4"/><path d="M11 14V9l-1.5 1"/></svg>',
+};
+
+function currentPlayMode() {
+  if (state.shuffle) return 'shuffle';
+  if (state.repeat === 'one') return 'one';
+  return 'list';
+}
+
+function cyclePlayMode() {
+  const order = ['shuffle', 'list', 'one'];
+  const next = order[(order.indexOf(currentPlayMode()) + 1) % order.length];
+  state.shuffle = next === 'shuffle';
+  state.repeat = next === 'one' ? 'one' : 'list';
+  localStorage.setItem('morg.shuffle', state.shuffle ? '1' : '0');
+  localStorage.setItem('morg.repeat', state.repeat);
+  updatePlayModeUI();
+  toast(next === 'shuffle' ? '随机播放' : next === 'one' ? '单曲循环' : '列表循环', 'ok', 1500);
+}
+
 function updatePlayModeUI() {
   const shuffleBtn = $('#pbShuffle');
   if (shuffleBtn) shuffleBtn.classList.toggle('active', state.shuffle);
-  const npShuffle = $('#npShuffle');
-  if (npShuffle) npShuffle.classList.toggle('active', state.shuffle);
   const repeatBtn = $('#pbRepeat');
   if (repeatBtn) {
     repeatBtn.classList.toggle('active', state.repeat !== 'off');
     repeatBtn.title = state.repeat === 'one' ? '单曲循环' : state.repeat === 'off' ? '不循环' : '列表循环';
     repeatBtn.style.opacity = state.repeat === 'off' ? '0.45' : '1';
   }
-  const npList = $('#npRepeatAll');
-  if (npList) npList.classList.toggle('active', state.repeat === 'list');
-  const npOne = $('#npRepeatOne');
-  if (npOne) npOne.classList.toggle('active', state.repeat === 'one');
+  const modeBtn = $('#npMode');
+  if (modeBtn) {
+    const mode = currentPlayMode();
+    modeBtn.className = `np-mode-btn np-mode-${mode}`;
+    modeBtn.innerHTML = PLAY_MODE_ICONS[mode];
+    modeBtn.title = mode === 'shuffle' ? '随机播放（点击切换）' : mode === 'one' ? '单曲循环（点击切换）' : '列表循环（点击切换）';
+  }
 }
 
 const PLAYBACK_QUALITY_LABELS = {
@@ -3742,6 +3775,15 @@ async function handleAction(action, el, event) {
     case 'cycle-repeat':
       cycleRepeat();
       break;
+    case 'cycle-play-mode':
+      cyclePlayMode();
+      break;
+    case 'toggle-lyrics': {
+      const nowPlaying = $('#nowPlaying');
+      if (nowPlaying) nowPlaying.classList.toggle('lyrics-collapsed');
+      if (el) el.classList.toggle('active', Boolean(nowPlaying && nowPlaying.classList.contains('lyrics-collapsed')));
+      break;
+    }
     case 'set-repeat-list':
       setRepeatMode('list');
       break;

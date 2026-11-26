@@ -927,10 +927,32 @@ body:not(.is-playing) .eq-bars { opacity: 0; }
   cursor: pointer; transition: transform .18s ease, background .18s ease, color .18s ease, box-shadow .18s ease;
 }
 .np-mode-btn svg { width: 23px; height: 23px; }
-.np-mode-btn.np-shuffle { color: #65ffd0; border-color: rgba(60,255,190,.30); background: rgba(30,190,145,.10); }
-.np-mode-btn.np-repeat-all { color: #b5a7ff; border-color: rgba(150,125,255,.32); background: rgba(105,80,255,.12); }
-.np-mode-btn.np-repeat-one { color: #ffc080; border-color: rgba(255,170,90,.32); background: rgba(255,135,60,.11); }
-.np-mode-btn:hover { transform: translateY(-2px); background: rgba(255,255,255,.075); color: #fff; }
+.np-mode-btn.np-mode-shuffle {
+  color: #06251b; border-color: rgba(74,255,190,.7);
+  background: linear-gradient(135deg, #67ffd0, #25d9a0);
+  box-shadow: 0 0 24px rgba(45,235,170,.42), inset 0 1px 0 rgba(255,255,255,.5);
+}
+.np-mode-btn.np-mode-list {
+  color: #fff; border-color: rgba(164,144,255,.85);
+  background: linear-gradient(135deg, #8e76ff, #5b45ef);
+  box-shadow: 0 0 24px rgba(112,82,255,.48), inset 0 1px 0 rgba(255,255,255,.4);
+}
+.np-mode-btn.np-mode-one {
+  color: #2b1302; border-color: rgba(255,196,120,.9);
+  background: linear-gradient(135deg, #ffd08a, #ff8a3d);
+  box-shadow: 0 0 24px rgba(255,145,60,.48), inset 0 1px 0 rgba(255,255,255,.5);
+}
+.np-mode-btn.np-lyrics-btn {
+  color: #e1e8ff; border-color: rgba(255,255,255,.14);
+  background: linear-gradient(135deg, rgba(92,104,140,.75), rgba(50,58,86,.85));
+  font-size: 17px; font-weight: 700; letter-spacing: 1px;
+}
+.np-mode-btn.np-lyrics-btn.active {
+  color: #061020; background: linear-gradient(135deg, #b9d7ff, #7fa8ff);
+  border-color: rgba(180,210,255,.8); box-shadow: 0 0 22px rgba(120,170,255,.4);
+}
+.nowplaying.lyrics-collapsed .np-body { grid-template-columns: 1fr; justify-items: center; }
+.nowplaying.lyrics-collapsed .np-right { display: none; }
 .np-mode-btn.np-shuffle.active {
   color: #05251b; border-color: rgba(74,255,190,.8);
   background: linear-gradient(135deg, #67ffd0, #25d9a0);
