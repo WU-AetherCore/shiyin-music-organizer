@@ -364,30 +364,21 @@ def list_artists():
             continue
         first = group["tracks"][0]
         data = track_json(first)
-        albums: Dict[str, Dict[str, Any]] = {}
+        album_names = {
+            str(track.get("album") or "未知专辑").strip() or "未知专辑"
+            for track in group["tracks"]
+        }
         duration = 0.0
         for track in group["tracks"]:
             duration += float(track.get("duration") or 0)
-            album_name = str(track.get("album") or "未知专辑").strip() or "未知专辑"
-            album = albums.get(album_name)
-            if album is None:
-                album = {
-                    "name": album_name,
-                    "year": track.get("year") or "",
-                    "cover_url": track_json(track).get("cover_url") or "",
-                    "track_count": 0,
-                }
-                albums[album_name] = album
-            album["track_count"] += 1
         item = {
             "name": name,
             "cover_url": data.get("cover_url") or "",
-            "image_url": images.get(key, ""),
+            "image_url": (images.get(key, "") + "?param=240y240") if images.get(key) and "music.126.net" in images.get(key, "") and "?" not in images.get(key, "") else images.get(key, ""),
             "track_count": len(group["tracks"]),
-            "album_count": len(albums),
+            "album_count": len(album_names),
             "duration": duration,
             "duration_text": format_duration(duration),
-            "albums": sorted(albums.values(), key=lambda album: (str(album.get("year") or ""), album["name"])),
         }
         items.append(item)
     items.sort(key=lambda item: (-item["track_count"], item["name"]))
@@ -439,7 +430,7 @@ def artist_detail():
             "artist": {
                 "name": name,
                 "cover_url": data.get("cover_url") or "",
-                "image_url": images.get(group["key"], ""),
+                "image_url": (images.get(group["key"], "") + "?param=320y320") if images.get(group["key"]) and "music.126.net" in images.get(group["key"], "") and "?" not in images.get(group["key"], "") else images.get(group["key"], ""),
                 "track_count": len(tracks),
                 "album_count": len(albums),
                 "tracks": songs,

@@ -829,7 +829,7 @@ function renderArtists() {
   }
   const cards = (a.items || []).map((artist) => `
     <button class="artist-card" data-action="artist-open" data-name="${esc(artist.name)}">
-      <div class="artist-card-img"><img src="${esc(artist.image_url || artist.cover_url)}" data-artist-image="${esc(artist.name)}" data-cover="${esc(artist.cover_url)}" ${artist.image_url ? 'data-loaded="1"' : ''} onerror="this.src=this.dataset.cover" alt=""><span class="artist-card-ring"></span></div>
+      <div class="artist-card-img"><img src="${esc(artist.image_url || artist.cover_url)}" loading="lazy" decoding="async" data-artist-image="${esc(artist.name)}" data-cover="${esc(artist.cover_url)}" ${artist.image_url ? 'data-loaded="1"' : ''} onerror="this.src=this.dataset.cover" alt=""><span class="artist-card-ring"></span></div>
       <b>${esc(artist.name)}</b>
       <span>${artist.track_count || 0} 首 · ${artist.album_count || 0} 张专辑</span>
     </button>`).join('');
@@ -887,9 +887,25 @@ function dailySeed(date, id, salt = 0) {
 }
 
 function dailyPick(all, date, salt = 0, count = 12) {
-  return [...(all || [])]
-    .sort((a, b) => dailySeed(date, a.id, salt) - dailySeed(date, b.id, salt))
-    .slice(0, count);
+  const sorted = [...(all || [])].sort(
+    (a, b) => dailySeed(date, a.id, salt) - dailySeed(date, b.id, salt)
+  );
+  const selected = [];
+  const used = new Map();
+  const artistOf = (track) => String(track.artist || track.artist_display || '').trim().toLowerCase() || '未知歌手';
+  for (const cap of [1, 2, 99]) {
+    for (const track of sorted) {
+      if (selected.length >= count) break;
+      if (selected.includes(track)) continue;
+      const artist = artistOf(track);
+      const countForArtist = used.get(artist) || 0;
+      if (countForArtist < cap) {
+        selected.push(track);
+        used.set(artist, countForArtist + 1);
+      }
+    }
+  }
+  return selected.slice(0, count);
 }
 
 async function loadDaily(force = false) {

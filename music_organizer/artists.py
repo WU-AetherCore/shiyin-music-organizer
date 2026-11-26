@@ -131,6 +131,8 @@ def fetch_artist_image(name: str, paths: AppPaths) -> str:
         if pic.startswith("http"):
             chosen = pic
     if chosen:
+        if "music.126.net" in chosen and "?" not in chosen:
+            chosen = chosen + "?param=240y240"
         with _CACHE_LOCK:
             cache = load_image_cache(paths)
             cache[key] = chosen
