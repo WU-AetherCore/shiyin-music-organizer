@@ -8,7 +8,7 @@
   <title>本地音乐整理小插件</title>
   <link rel="manifest" href="/manifest.json">
   <link rel="icon" href="/static/img/icon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="/static/css/app.css?v={{ version }}">
+  <link rel="stylesheet" href="/static/css/app.css?v={{ asset_version }}">
 </head>
 <body data-version="{{ version }}">
 <button class="desktop-close" id="desktopClose" title="关闭拾音" aria-label="关闭拾音">×</button>
@@ -271,6 +271,6 @@
 <div class="modal-root" id="modalRoot" aria-hidden="true"></div>
 <div class="toast-root" id="toastRoot" aria-live="polite"></div>
 <audio id="audio" preload="auto"></audio>
-<script src="/static/js/app.js?v={{ version }}"></script>
+<script src="/static/js/app.js?v={{ asset_version }}"></script>
 </body>
 </html>

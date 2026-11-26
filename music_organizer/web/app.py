@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import secrets
+from pathlib import Path
 from typing import Optional
 
 from flask import Flask, jsonify, redirect, render_template, request, session, url_for
@@ -21,6 +22,22 @@ from .files_api import bp as files_bp
 log = get_logger("app")
 
 PUBLIC_ENDPOINTS = {"login", "static", "health", "manifest", "favicon"}
+
+_STATIC_DIR = Path(__file__).resolve().parent / "static"
+
+
+def _asset_version() -> str:
+    try:
+        stamps = [
+            ( _STATIC_DIR / "css" / "app.css").stat().st_mtime,
+            (_STATIC_DIR / "js" / "app.js").stat().st_mtime,
+        ]
+        return f"{__version__}-{int(max(stamps))}"
+    except Exception:
+        return __version__
+
+
+ASSET_VERSION = _asset_version()
 
 
 def create_app(
@@ -98,6 +115,7 @@ def create_app(
         return render_template(
             "index.html",
             version=__version__,
+            asset_version=ASSET_VERSION,
             app_title="本地音乐整理小插件",
             has_password=cfg.has_web_password,
             initialized=cfg.is_initialized(),
