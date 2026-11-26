@@ -1200,7 +1200,7 @@ body:not(.is-playing) .eq-bars { opacity: 0; }
   .np-title { font-size: 20px; }
   .np-meta { margin-top: 8px; }
   .np-actions { margin-top: 8px; }
-  .np-foot .np-eq { display: none; }
+  .np-foot .np-eq { display: flex; height: 20px; margin-bottom: 2px; }
   .np-foot { padding-top: 2px; }
 }
 
