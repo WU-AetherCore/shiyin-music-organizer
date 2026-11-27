@@ -2806,12 +2806,8 @@ async function toggleDesktopLyrics() {
       const pip = await documentPictureInPicture.requestWindow({ width: 560, height: 190 });
       desktopLyricsWindow = pip;
       installDesktopLyricsStyle(pip.document);
-      pip.document.documentElement.style.background = 'transparent';
-      pip.document.documentElement.style.height = '100%';
-      pip.document.body.style.margin = '0';
-      pip.document.body.style.overflow = 'hidden';
-      pip.document.body.style.height = '100%';
-      pip.document.body.style.background = 'transparent';
+      pip.document.documentElement.style.cssText = 'background:#0d1220;height:100%;margin:0;color-scheme:dark;';
+      pip.document.body.style.cssText = 'margin:0;overflow:hidden;height:100%;background:linear-gradient(160deg,#202943 0%,#111827 62%,#0b101b 100%);';
       root.classList.add('in-pip');
       pip.document.body.appendChild(root);
       pip.addEventListener('pagehide', () => { if (desktopLyricsWindow === pip) closeDesktopLyrics(); });
