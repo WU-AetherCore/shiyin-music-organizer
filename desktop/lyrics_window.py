@@ -53,7 +53,7 @@ class LyricsWindow:
         self.root.overrideredirect(True)
         self.root.attributes("-topmost", True)
         try:
-            self.root.attributes("-alpha", 0.94)
+            self.root.attributes("-alpha", 0.78)
         except tk.TclError:
             pass
         self.root.configure(bg="#0d1220")
@@ -99,7 +99,7 @@ class LyricsWindow:
             pass
 
     def _build(self) -> None:
-        self.panel = tk.Frame(self.root, bg="#111827", highlightthickness=1, highlightbackground="#2d3b5c")
+        self.panel = tk.Frame(self.root, bg="#111827", highlightthickness=1, highlightbackground="#41527a")
         self.panel.pack(fill="both", expand=True, padx=3, pady=3)
 
         self.close_btn = tk.Button(
@@ -244,6 +244,7 @@ class LyricsWindow:
                 self.visible = True
                 self.root.deiconify()
                 self.root.attributes("-topmost", True)
+                self._arm_fade()
             elif not visible and self.visible:
                 self.visible = False
                 self.root.withdraw()
