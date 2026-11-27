@@ -506,6 +506,55 @@ def desktop_close():
     return jsonify({"ok": True})
 
 
+_DESKTOP_LYRICS: Dict[str, Any] = {
+    "visible": False,
+    "current": "",
+    "next": "",
+    "title": "",
+    "playing": False,
+    "command": "",
+    "seq": 0,
+}
+
+
+@bp.get("/desktop/lyrics-state")
+def desktop_lyrics_state():
+    return jsonify({"ok": True, **_DESKTOP_LYRICS})
+
+
+@bp.post("/desktop/lyrics-state")
+def desktop_lyrics_update():
+    body = _body()
+    for key in ("current", "next", "title"):
+        if key in body:
+            _DESKTOP_LYRICS[key] = str(body.get(key) or "")[:500]
+    if "playing" in body:
+        _DESKTOP_LYRICS["playing"] = bool(body.get("playing"))
+    return jsonify({"ok": True, "visible": _DESKTOP_LYRICS["visible"]})
+
+
+@bp.post("/desktop/lyrics-toggle")
+def desktop_lyrics_toggle():
+    body = _body()
+    if "visible" in body:
+        _DESKTOP_LYRICS["visible"] = bool(body.get("visible"))
+    else:
+        _DESKTOP_LYRICS["visible"] = not _DESKTOP_LYRICS["visible"]
+    return jsonify({"ok": True, "visible": _DESKTOP_LYRICS["visible"]})
+
+
+@bp.post("/desktop/lyrics-command")
+def desktop_lyrics_command():
+    body = _body()
+    action = str(body.get("action") or "").strip()
+    if action not in ("prev", "next", "toggle"):
+        raise ApiError("不支持的歌词控制")
+    _DESKTOP_LYRICS["command"] = action
+    _DESKTOP_LYRICS["seq"] = int(_DESKTOP_LYRICS.get("seq") or 0) + 1
+    return jsonify({"ok": True, "seq": _DESKTOP_LYRICS["seq"]})
+    return jsonify({"ok": True})
+
+
 @bp.get("/tracks/<int:track_id>")
 def track_detail(track_id: int):
     track = _track_or_404(track_id)

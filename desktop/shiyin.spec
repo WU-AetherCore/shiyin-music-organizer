@@ -21,6 +21,8 @@ hiddenimports = [
     "mutagen.wave",
     "PIL.Image",
     "PIL.ImageDraw",
+    "lyrics_window",
+    "tkinter",
 ]
 for package in ("zhconv",):
     package_datas, package_binaries, package_hidden = collect_all(package)
@@ -35,14 +37,14 @@ else:
 
 a = Analysis(
     [str(ROOT / "desktop" / "launcher.py")],
-    pathex=[str(ROOT)],
+    pathex=[str(ROOT), str(ROOT / "desktop")],
     binaries=binaries,
     datas=datas,
     hiddenimports=hiddenimports,
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=["tkinter", "matplotlib", "scipy", "pandas"],
+    excludes=["matplotlib", "scipy", "pandas"],
     noarchive=False,
 )
 pyz = PYZ(a.pure)

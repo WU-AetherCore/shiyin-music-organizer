@@ -340,6 +340,24 @@ def close_stale_windows() -> None:
     user32.EnumWindows(callback_type(callback), 0)
 
 
+def start_desktop_lyrics_helper() -> None:
+    """启动独立置顶歌词窗口进程。"""
+    try:
+        if getattr(sys, "frozen", False):
+            cmd = [sys.executable, "--desktop-lyrics"]
+        else:
+            cmd = [sys.executable, str(Path(__file__).resolve()), "--desktop-lyrics"]
+        subprocess.Popen(
+            cmd,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            creationflags=0x08000000,
+        )
+        log("desktop lyrics helper started")
+    except Exception:
+        log("desktop lyrics helper failed\n" + traceback.format_exc())
+
+
 def run() -> int:
     close_stale_windows()
     if not single_instance():
@@ -389,6 +407,7 @@ def run() -> int:
         message_box("拾音后端启动失败，详情：" + str(data_root() / "logs" / "desktop.log"), error=True)
         return 1
     log("backend ready")
+    start_desktop_lyrics_helper()
 
     edge = find_edge()
     if not edge:
@@ -494,6 +513,14 @@ def run() -> int:
 
 
 def main() -> int:
+    if "--desktop-lyrics" in sys.argv:
+        try:
+            from lyrics_window import main as lyrics_main
+
+            return lyrics_main()
+        except Exception:
+            log("desktop lyrics window crash\n" + traceback.format_exc())
+            return 1
     log(f"desktop launcher start frozen={getattr(sys, 'frozen', False)} exe={sys.executable}")
     try:
         return run()

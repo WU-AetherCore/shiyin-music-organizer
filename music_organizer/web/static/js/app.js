@@ -2924,8 +2924,56 @@ async function toggleDesktopLyrics() {
   desktopLyricsWake(true);
 }
 
-const PLAY_MODE_ICONS = {
-  shuffle: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h3c4 0 5 10 10 10h3"/><path d="M17 4l3 3-3 3"/><path d="M4 17h3c1.2 0 2.2-.4 3-1.1"/><path d="M14 8.1c1-.7 2-1.1 3-1.1h3"/><path d="M17 14l3 3-3 3"/></svg>',
+let lastNativeLyricsCommand = null;
+
+async function pushNativeLyricsState() {
+  if (!new URLSearchParams(location.search).has('desktop')) return;
+  const lines = (state.lyrics && state.lyrics.lines) || [];
+  const active = (state.lyrics && state.lyrics.active) || -1;
+  const current = active >= 0 && lines[active] ? lines[active].text : '';
+  const next = active >= 0 && lines[active + 1] ? lines[active + 1].text : '';
+  try {
+    await api('/api/desktop/lyrics-state', {
+      method: 'POST',
+      body: {
+        current,
+        next,
+        title: state.current ? state.current.title : '',
+        playing: !audio.paused,
+      },
+    });
+  } catch (err) {}
+}
+
+async function pollNativeLyricsState() {
+  if (!new URLSearchParams(location.search).has('desktop')) return;
+  try {
+    const data = await api('/api/desktop/lyrics-state');
+    const btn = $('#npLyricsBtn');
+    if (btn) btn.classList.toggle('on', Boolean(data.visible));
+    if (lastNativeLyricsCommand === null) {
+      lastNativeLyricsCommand = Number(data.seq) || 0;
+    } else if ((Number(data.seq) || 0) > lastNativeLyricsCommand) {
+      lastNativeLyricsCommand = Number(data.seq) || 0;
+      if (data.command === 'prev') prevTrack();
+      else if (data.command === 'next') nextTrack(false);
+      else if (data.command === 'toggle') togglePlay();
+    }
+  } catch (err) {}
+}
+
+async function toggleNativeDesktopLyrics() {
+  try {
+    const data = await api('/api/desktop/lyrics-toggle', { method: 'POST', body: {} });
+    const btn = $('#npLyricsBtn');
+    if (btn) btn.classList.toggle('on', Boolean(data.visible));
+    if (data.visible) await pushNativeLyricsState();
+  } catch (err) {
+    toast(err.message, 'err');
+  }
+}
+
+const PLAY_MODE_ICONS = {  shuffle: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h3c4 0 5 10 10 10h3"/><path d="M17 4l3 3-3 3"/><path d="M4 17h3c1.2 0 2.2-.4 3-1.1"/><path d="M14 8.1c1-.7 2-1.1 3-1.1h3"/><path d="M17 14l3 3-3 3"/></svg>',
   list: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3l3 3-3 3"/><path d="M4 8V7a3 3 0 0 1 3-3h13"/><path d="M7 21l-3-3 3-3"/><path d="M20 16v1a3 3 0 0 1-3 3H4"/></svg>',
   one: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3l3 3-3 3"/><path d="M4 8V7a3 3 0 0 1 3-3h13"/><path d="M7 21l-3-3 3-3"/><path d="M20 16v1a3 3 0 0 1-3 3H4"/><path d="M11 14V9l-1.5 1"/></svg>',
 };
@@ -3995,7 +4043,8 @@ async function handleAction(action, el, event) {
       cyclePlayMode();
       break;
     case 'toggle-lyrics':
-      await toggleDesktopLyrics();
+      if (IS_DESKTOP_SHELL) await toggleNativeDesktopLyrics();
+      else await toggleDesktopLyrics();
       break;
     case 'set-repeat-list':
       setRepeatMode('list');
@@ -4818,6 +4867,12 @@ function bindEvents() {
 
 async function init() {
   bindEvents();
+  if (new URLSearchParams(location.search).has('desktop')) {
+    setInterval(pushNativeLyricsState, 500);
+    setInterval(pollNativeLyricsState, 500);
+    pushNativeLyricsState();
+    pollNativeLyricsState();
+  }
   if (new URLSearchParams(location.search).get('desktop') === '1') {
     document.body.classList.add('desktop-shell');
     const closeButton = $('#desktopClose');
