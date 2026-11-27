@@ -2859,12 +2859,15 @@ async function toggleDesktopLyrics() {
   if ('documentPictureInPicture' in window) {
     let savedSize = { width: 560, height: 190 };
     try { savedSize = JSON.parse(localStorage.getItem('morg.dltSize') || 'null') || savedSize; } catch (err) {}
+    let targetWidth = Math.max(360, Math.min(700, Number(savedSize.width) || 560));
+    let targetHeight = Math.max(130, Math.min(360, Number(savedSize.height) || 190));
     try {
       const pip = await documentPictureInPicture.requestWindow({
-        width: Math.max(360, Number(savedSize.width) || 560),
-        height: Math.max(130, Number(savedSize.height) || 190),
+        width: targetWidth,
+        height: targetHeight,
       });
       desktopLyricsWindow = pip;
+      try { pip.resizeTo(targetWidth, targetHeight); } catch (err) {}
       installDesktopLyricsStyle(pip.document);
       pip.document.documentElement.style.cssText = 'background:transparent;height:100%;margin:0;color-scheme:dark;';
       pip.document.body.style.cssText = 'margin:0;overflow:hidden;height:100%;background:rgba(10,14,24,.18);';
@@ -2887,6 +2890,21 @@ async function toggleDesktopLyrics() {
       pip.addEventListener('pagehide', saveBounds);
       pip.addEventListener('pagehide', () => { if (desktopLyricsWindow === pip) closeDesktopLyrics(); });
       pip.document.addEventListener('keydown', (event) => { if (event.key === 'Escape') closeDesktopLyrics(); });
+      setTimeout(() => {
+        // 某些 Edge 会恢复上一次异常巨大的窗口；发现的分钟级大窗直接回退为页内小浮窗。
+        try {
+          if (!pip.closed && (pip.outerWidth > 900 || pip.outerHeight > 560)) {
+            desktopLyricsWindow = null;
+            try { pip.close(); } catch (err) {}
+            root.classList.remove('in-pip');
+            root.style.cssText = '';
+            installDesktopLyricsStyle(document);
+            document.body.appendChild(root);
+            applyDesktopLyricsPosition(root);
+            updateDesktopLyrics();
+          }
+        } catch (err) {}
+      }, 450);
       updateDesktopLyrics();
       desktopLyricsTimer = setInterval(updateDesktopLyrics, 200);
       desktopLyricsWake(true);
