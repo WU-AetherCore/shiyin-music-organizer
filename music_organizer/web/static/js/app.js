@@ -130,6 +130,8 @@ const ICONS = {
    全局状态
    ------------------------------------------------------------------------- */
 
+const IS_DESKTOP_SHELL = new URLSearchParams(location.search).has('desktop');
+
 const state = {
   route: 'dashboard',
   overview: null,
