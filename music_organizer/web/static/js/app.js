@@ -2698,6 +2698,8 @@ function syncCoverSpin() {
 let desktopLyricsWindow = null;
 let desktopLyricsRoot = null;
 let desktopLyricsTimer = 0;
+let desktopLyricsLocked = false;
+let desktopLyricsFadeTimer = 0;
 
 const DESKTOP_LYRICS_STYLE = `
 #dltRoot{position:fixed;left:50%;bottom:calc(var(--player-h, 88px) + 18px);transform:translateX(-50%);min-width:300px;max-width:min(620px,88vw);font-size:26px;color:#fff;background:rgba(16,21,38,.92);backdrop-filter:blur(28px) saturate(180%) brightness(1.06);-webkit-backdrop-filter:blur(28px) saturate(180%) brightness(1.06);border:1px solid rgba(255,255,255,.22);border-radius:22px;padding:12px 18px 14px;box-shadow:0 8px 32px rgba(0,0,0,.45),inset 0 1px 1px rgba(255,255,255,.28);user-select:none;z-index:999999;box-sizing:border-box;cursor:grab}
@@ -2712,6 +2714,11 @@ const DESKTOP_LYRICS_STYLE = `
 #dltCur{font-size:1em;font-weight:700;color:#fff;line-height:1.3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-shadow:0 1px 10px rgba(0,0,0,.5)}
 #dltRoot.in-pip #dltCur{white-space:normal}
 #dltHint{font-size:12px;color:#e8edff;margin-top:6px;opacity:.9;line-height:1.4}
+#dltRoot.faded{background:transparent !important;border-color:transparent !important;box-shadow:none !important;backdrop-filter:none !important;-webkit-backdrop-filter:none !important;padding:6px 10px}
+#dltRoot.faded #dltBar{opacity:0}
+#dltRoot.faded #dltCur{text-shadow:0 1px 4px rgba(0,0,0,.9),0 0 12px rgba(0,0,0,.7)}
+#dltRoot.faded #dltHint{display:none}
+#dltRoot.locked{cursor:default}
 `;
 
 function installDesktopLyricsStyle(doc) {
@@ -2732,6 +2739,7 @@ function buildDesktopLyricsRoot() {
       <button class="dlt-btn" id="dltPlay" title="播放/暂停">▶</button>
       <button class="dlt-btn" id="dltNextBtn" title="下一首">⏭</button>
       <span class="dlt-sep"></span>
+      <button class="dlt-btn" id="dltLock" title="锁定位置">🔓</button>
       <button class="dlt-btn" id="dltDec" title="减小字号">A-</button>
       <button class="dlt-btn" id="dltInc" title="增大字号">A+</button>
       <button class="dlt-btn" id="dltClose" title="关闭桌面歌词">×</button>
@@ -2739,11 +2747,25 @@ function buildDesktopLyricsRoot() {
     <div id="dltNext"></div>
     <div id="dltCur">♪ 等待播放</div>
     <div id="dltHint"></div>`;
+  try { desktopLyricsLocked = localStorage.getItem('morg.dltLocked') === '1'; } catch (err) {}
+  root.classList.toggle('locked', desktopLyricsLocked);
+  const lockBtn = root.querySelector('#dltLock');
+  if (lockBtn) lockBtn.textContent = desktopLyricsLocked ? '🔒' : '🔓';
   let fontSize = 26;
+  try { fontSize = parseInt(localStorage.getItem('morg.dltFontSize')) || 26; } catch (err) {}
   const setFont = (px) => {
     fontSize = Math.max(16, Math.min(56, px));
     root.style.fontSize = `${fontSize}px`;
+    try { localStorage.setItem('morg.dltFontSize', String(fontSize)); } catch (err) {}
   };
+  setFont(fontSize);
+  root.querySelector('#dltLock').addEventListener('click', (e) => {
+    e.stopPropagation();
+    desktopLyricsLocked = !desktopLyricsLocked;
+    root.classList.toggle('locked', desktopLyricsLocked);
+    root.querySelector('#dltLock').textContent = desktopLyricsLocked ? '🔒' : '🔓';
+    try { localStorage.setItem('morg.dltLocked', desktopLyricsLocked ? '1' : '0'); } catch (err) {}
+  });
   root.querySelector('#dltPrev').addEventListener('click', (e) => { e.stopPropagation(); prevTrack(); });
   root.querySelector('#dltNextBtn').addEventListener('click', (e) => { e.stopPropagation(); nextTrack(false); });
   root.querySelector('#dltPlay').addEventListener('click', (e) => { e.stopPropagation(); togglePlay(); });
@@ -2752,7 +2774,7 @@ function buildDesktopLyricsRoot() {
   root.querySelector('#dltClose').addEventListener('click', (e) => { e.stopPropagation(); closeDesktopLyrics(); });
   let dragging = false, sx = 0, sy = 0, sl = 0, st = 0;
   root.addEventListener('mousedown', (e) => {
-    if (e.target.closest('.dlt-btn') || root.classList.contains('in-pip')) return;
+    if (e.target.closest('.dlt-btn') || root.classList.contains('in-pip') || desktopLyricsLocked) return;
     dragging = true; root.classList.add('dragging');
     sx = e.clientX; sy = e.clientY;
     const rect = root.getBoundingClientRect(); sl = rect.left; st = rect.top;
@@ -2765,9 +2787,40 @@ function buildDesktopLyricsRoot() {
     root.style.left = `${Math.max(0, Math.min(window.innerWidth - root.offsetWidth, sl + e.clientX - sx))}px`;
     root.style.top = `${Math.max(0, Math.min(window.innerHeight - root.offsetHeight, st + e.clientY - sy))}px`;
   });
-  document.addEventListener('mouseup', () => { dragging = false; root.classList.remove('dragging'); });
+  document.addEventListener('mouseup', () => {
+    if (dragging) {
+      try { localStorage.setItem('morg.dltPos', JSON.stringify({ left: parseFloat(root.style.left), top: parseFloat(root.style.top) })); } catch (err) {}
+    }
+    dragging = false; root.classList.remove('dragging');
+  });
+  root.addEventListener('mouseenter', () => desktopLyricsWake(false));
+  root.addEventListener('mouseleave', () => desktopLyricsWake(true));
   desktopLyricsRoot = root;
   return root;
+}
+
+function applyDesktopLyricsPosition(root) {
+  try {
+    const saved = JSON.parse(localStorage.getItem('morg.dltPos') || 'null');
+    if (saved && Number.isFinite(saved.left) && Number.isFinite(saved.top)) {
+      root.style.transform = 'none';
+      root.style.bottom = 'auto';
+      root.style.left = `${Math.min(Math.max(0, saved.left), Math.max(0, window.innerWidth - root.offsetWidth))}px`;
+      root.style.top = `${Math.min(Math.max(0, saved.top), Math.max(0, window.innerHeight - root.offsetHeight))}px`;
+    }
+  } catch (err) {}
+}
+
+function desktopLyricsWake(arm) {
+  const root = desktopLyricsRoot;
+  if (!root) return;
+  clearTimeout(desktopLyricsFadeTimer);
+  if (!desktopLyricsLocked) root.classList.remove('faded');
+  if (arm && !desktopLyricsLocked) {
+    desktopLyricsFadeTimer = setTimeout(() => {
+      if (!desktopLyricsLocked && desktopLyricsRoot) desktopLyricsRoot.classList.add('faded');
+    }, 3000);
+  }
 }
 
 function updateDesktopLyrics() {
@@ -2788,37 +2841,24 @@ function updateDesktopLyrics() {
 
 function closeDesktopLyrics() {
   if (desktopLyricsTimer) { clearInterval(desktopLyricsTimer); desktopLyricsTimer = 0; }
+  clearTimeout(desktopLyricsFadeTimer);
   if (desktopLyricsWindow) { try { desktopLyricsWindow.close(); } catch (err) {} desktopLyricsWindow = null; }
   if (desktopLyricsRoot) { desktopLyricsRoot.remove(); desktopLyricsRoot = null; }
   const btn = $('#npLyricsBtn');
   if (btn) btn.classList.remove('on');
 }
 
-async function toggleDesktopLyrics() {
+function toggleDesktopLyrics() {
   if (desktopLyricsRoot) { closeDesktopLyrics(); return; }
   const root = buildDesktopLyricsRoot();
   installDesktopLyricsStyle(document);
   document.body.appendChild(root);
+  applyDesktopLyricsPosition(root);
   const btn = $('#npLyricsBtn');
   if (btn) btn.classList.add('on');
-  if ('documentPictureInPicture' in window) {
-    try {
-      const pip = await documentPictureInPicture.requestWindow({ width: 560, height: 190 });
-      desktopLyricsWindow = pip;
-      installDesktopLyricsStyle(pip.document);
-      pip.document.documentElement.style.cssText = 'background:#0d1220;height:100%;margin:0;color-scheme:dark;';
-      pip.document.body.style.cssText = 'margin:0;overflow:hidden;height:100%;background:linear-gradient(160deg,#202943 0%,#111827 62%,#0b101b 100%);';
-      root.classList.add('in-pip');
-      pip.document.body.appendChild(root);
-      pip.addEventListener('pagehide', () => { if (desktopLyricsWindow === pip) closeDesktopLyrics(); });
-    } catch (err) {
-      desktopLyricsWindow = null;
-      root.classList.remove('in-pip');
-      document.body.appendChild(root);
-    }
-  }
   updateDesktopLyrics();
   desktopLyricsTimer = setInterval(updateDesktopLyrics, 200);
+  desktopLyricsWake(true);
 }
 
 const PLAY_MODE_ICONS = {
