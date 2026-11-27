@@ -341,6 +341,7 @@ def close_stale_windows() -> None:
 
 
 def run() -> int:
+    close_stale_windows()
     if not single_instance():
         if focus_existing_window():
             log("existing window focused")
@@ -348,7 +349,6 @@ def run() -> int:
         log("stale instance without window; terminating it")
         kill_other_instances()
         time.sleep(1.0)
-    close_stale_windows()
     ensure_ffmpeg()
     log(f"launcher start version={APP_VERSION} frozen={getattr(sys, 'frozen', False)}")
 
