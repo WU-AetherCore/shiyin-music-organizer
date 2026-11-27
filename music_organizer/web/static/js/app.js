@@ -2848,14 +2848,55 @@ function closeDesktopLyrics() {
   if (btn) btn.classList.remove('on');
 }
 
-function toggleDesktopLyrics() {
+async function toggleDesktopLyrics() {
   if (desktopLyricsRoot) { closeDesktopLyrics(); return; }
   const root = buildDesktopLyricsRoot();
   installDesktopLyricsStyle(document);
-  document.body.appendChild(root);
-  applyDesktopLyricsPosition(root);
   const btn = $('#npLyricsBtn');
   if (btn) btn.classList.add('on');
+  if ('documentPictureInPicture' in window) {
+    let savedSize = { width: 560, height: 190 };
+    try { savedSize = JSON.parse(localStorage.getItem('morg.dltSize') || 'null') || savedSize; } catch (err) {}
+    try {
+      const pip = await documentPictureInPicture.requestWindow({
+        width: Math.max(360, Number(savedSize.width) || 560),
+        height: Math.max(130, Number(savedSize.height) || 190),
+      });
+      desktopLyricsWindow = pip;
+      installDesktopLyricsStyle(pip.document);
+      pip.document.documentElement.style.cssText = 'background:transparent;height:100%;margin:0;color-scheme:dark;';
+      pip.document.body.style.cssText = 'margin:0;overflow:hidden;height:100%;background:rgba(10,14,24,.18);';
+      root.classList.add('in-pip');
+      root.style.background = 'linear-gradient(145deg,rgba(48,58,88,.72),rgba(16,22,38,.72))';
+      root.style.backdropFilter = 'blur(28px) saturate(180%) brightness(1.08)';
+      root.style.webkitBackdropFilter = 'blur(28px) saturate(180%) brightness(1.08)';
+      root.style.border = '1px solid rgba(255,255,255,.24)';
+      root.style.borderRadius = '22px';
+      root.style.boxShadow = '0 8px 32px rgba(0,0,0,.35), inset 0 1px 1px rgba(255,255,255,.30)';
+      pip.document.body.appendChild(root);
+      const saveBounds = () => {
+        try {
+          localStorage.setItem('morg.dltSize', JSON.stringify({
+            width: pip.outerWidth || pip.innerWidth || 560,
+            height: pip.outerHeight || pip.innerHeight || 190,
+          }));
+        } catch (err) {}
+      };
+      pip.addEventListener('pagehide', saveBounds);
+      pip.addEventListener('pagehide', () => { if (desktopLyricsWindow === pip) closeDesktopLyrics(); });
+      updateDesktopLyrics();
+      desktopLyricsTimer = setInterval(updateDesktopLyrics, 200);
+      desktopLyricsWake(true);
+      return;
+    } catch (err) {
+      desktopLyricsWindow = null;
+      root.classList.remove('in-pip');
+      root.style.cssText = '';
+      installDesktopLyricsStyle(document);
+    }
+  }
+  document.body.appendChild(root);
+  applyDesktopLyricsPosition(root);
   updateDesktopLyrics();
   desktopLyricsTimer = setInterval(updateDesktopLyrics, 200);
   desktopLyricsWake(true);
