@@ -2715,7 +2715,9 @@ const DESKTOP_LYRICS_STYLE = `
 #dltRoot.in-pip #dltCur{white-space:normal}
 #dltHint{font-size:12px;color:#e8edff;margin-top:6px;opacity:.9;line-height:1.4}
 #dltRoot.faded{background:transparent !important;border-color:transparent !important;box-shadow:none !important;backdrop-filter:none !important;-webkit-backdrop-filter:none !important;padding:6px 10px}
-#dltRoot.faded #dltBar{opacity:0}
+#dltRoot.faded #dltBar{opacity:1}
+#dltRoot.faded #dltBar .dlt-btn{opacity:0;pointer-events:none}
+#dltRoot.faded #dltClose{opacity:1 !important;pointer-events:auto !important}
 #dltRoot.faded #dltCur{text-shadow:0 1px 4px rgba(0,0,0,.9),0 0 12px rgba(0,0,0,.7)}
 #dltRoot.faded #dltHint{display:none}
 #dltRoot.locked{cursor:default}
@@ -2884,6 +2886,7 @@ async function toggleDesktopLyrics() {
       };
       pip.addEventListener('pagehide', saveBounds);
       pip.addEventListener('pagehide', () => { if (desktopLyricsWindow === pip) closeDesktopLyrics(); });
+      pip.document.addEventListener('keydown', (event) => { if (event.key === 'Escape') closeDesktopLyrics(); });
       updateDesktopLyrics();
       desktopLyricsTimer = setInterval(updateDesktopLyrics, 200);
       desktopLyricsWake(true);
@@ -2897,6 +2900,7 @@ async function toggleDesktopLyrics() {
   }
   document.body.appendChild(root);
   applyDesktopLyricsPosition(root);
+  document.addEventListener('keydown', (event) => { if (event.key === 'Escape') closeDesktopLyrics(); });
   updateDesktopLyrics();
   desktopLyricsTimer = setInterval(updateDesktopLyrics, 200);
   desktopLyricsWake(true);
