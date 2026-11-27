@@ -2673,21 +2673,8 @@ function startEq() {
         const weight = 0.5 + 0.5 * (1 - d);
         rawValues.push(data ? (data[idx] / 255) * weight : 0);
       });
-      const measuredPeak = Math.max(...rawValues);
       bars.forEach((bar, i) => {
-        const d = center <= 0 ? 0 : Math.abs(i - center) / center;
-        const wave = 0.5 + 0.5 * Math.sin(t * 2.35 + i * 0.58);
-        const idleWave = (0.16 + 0.22 * wave) * (0.55 + 0.45 * (1 - d));
-        if (!data || measuredPeak < 0.05) {
-          rawValues[i] = idleWave;
-        } else {
-          rawValues[i] = Math.max(rawValues[i], idleWave * 0.72);
-        }
-      });
-      const peak = Math.max(0.001, ...rawValues);
-      const gain = Math.min(4.5, 0.9 / peak);
-      bars.forEach((bar, i) => {
-        const value = Math.min(1, rawValues[i] * gain);
+        const value = rawValues[i];
         bar.style.height = `${(3 + value * maxH).toFixed(1)}px`;
         bar.style.opacity = (0.55 + value * 0.45).toFixed(2);
         if (recolor) {
@@ -2706,6 +2693,126 @@ function syncCoverSpin() {
   if (!wrap) return;
   wrap.classList.toggle('spin-cover', Boolean(state.coverSpin));
   wrap.title = state.coverSpin ? '点击恢复方形封面' : '点击切换圆形旋转封面';
+}
+
+let desktopLyricsWindow = null;
+let desktopLyricsTimer = 0;
+
+function desktopLyricRows() {
+  const lines = (state.lyrics && state.lyrics.lines) || [];
+  const active = (state.lyrics && state.lyrics.active) || -1;
+  const current = active >= 0 && lines[active] ? lines[active].text : '';
+  const prev = active > 0 && lines[active - 1] ? lines[active - 1].text : '';
+  const next = active >= 0 && lines[active + 1] ? lines[active + 1].text : '';
+  const title = state.current ? `${state.current.title || ''}` : '';
+  return { current: current || title || '等待播放', prev, next: next || (state.current ? '♪' : '打开拾音开始播放'), title };
+}
+
+function paintDesktopLyrics() {
+  const win = desktopLyricsWindow;
+  if (!win || win.closed) return;
+  const doc = win.document;
+  const rows = desktopLyricRows();
+  const cur = doc.getElementById('dltCur');
+  const prev = doc.getElementById('dltPrev');
+  const next = doc.getElementById('dltNext');
+  const play = doc.getElementById('dltPlay');
+  if (cur) cur.textContent = rows.current;
+  if (prev) prev.textContent = rows.prev;
+  if (next) next.textContent = rows.next;
+  if (play) play.textContent = audio.paused ? '▶' : 'Ⅱ';
+}
+
+function closeDesktopLyrics() {
+  if (desktopLyricsTimer) {
+    clearInterval(desktopLyricsTimer);
+    desktopLyricsTimer = 0;
+  }
+  if (desktopLyricsWindow) {
+    try { desktopLyricsWindow.close(); } catch (err) {}
+    desktopLyricsWindow = null;
+  }
+  const btn = $('#npLyricsBtn');
+  if (btn) btn.classList.remove('on');
+}
+
+async function toggleDesktopLyrics() {
+  if (desktopLyricsWindow && !desktopLyricsWindow.closed) {
+    closeDesktopLyrics();
+    return;
+  }
+  let win = null;
+  try {
+    if ('documentPictureInPicture' in window) {
+      win = await documentPictureInPicture.requestWindow({ width: 560, height: 190 });
+    } else {
+      win = window.open('', 'shiyin-desktop-lyrics', 'popup=yes,width=560,height=190');
+    }
+  } catch (err) {
+    toast('浏览器不支持桌面歌词窗口', 'err');
+    return;
+  }
+  if (!win) {
+    toast('桌面歌词窗口被浏览器拦截', 'err');
+    return;
+  }
+  desktopLyricsWindow = win;
+  const doc = win.document;
+  doc.title = '拾音 · 桌面歌词';
+  doc.body.innerHTML = `
+    <style>
+      *{box-sizing:border-box}
+      html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#101421;color:#f5f7ff;font-family:"Microsoft YaHei","PingFang SC",sans-serif}
+      body{padding:12px 16px;background:radial-gradient(120% 160% at 50% 0%,#202943,#0d111c 72%);border:1px solid rgba(255,255,255,.12);border-radius:18px}
+      .dlt-top{display:flex;align-items:center;justify-content:space-between;color:#9ca9c6;font-size:11px;letter-spacing:.8px}
+      .dlt-tools{display:flex;align-items:center;gap:6px}
+      .dlt-btn{border:0;background:rgba(255,255,255,.10);color:#e8edff;width:26px;height:26px;border-radius:8px;cursor:pointer;font-size:14px;line-height:1}
+      .dlt-btn:hover{background:rgba(255,255,255,.18)}
+      #dltPrev{min-height:16px;margin-top:4px;color:#8d9bb9;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+      #dltCur{margin-top:4px;color:#fff6cf;font-size:22px;font-weight:600;line-height:1.35;text-shadow:0 0 16px rgba(255,228,150,.3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+      #dltNext{margin-top:4px;color:#aeb8d2;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+      .dlt-foot{margin-top:7px;color:#64718e;font-size:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+      .dlt-actions{display:flex;align-items:center;gap:12px;margin-top:7px}
+      .dlt-nav{border:0;background:transparent;color:#c9d3eb;font-size:17px;cursor:pointer;padding:0 5px}
+      .dlt-nav:hover{color:#fff}
+      .dlt-close{margin-left:auto}
+    </style>
+    <div class="dlt-top"><span>拾音 · 桌面歌词</span><div class="dlt-tools">
+      <button class="dlt-btn" id="dltFontMinus" title="缩小字号">A-</button>
+      <button class="dlt-btn" id="dltFontPlus" title="放大字号">A+</button>
+      <button class="dlt-btn dlt-close" id="dltClose" title="关闭桌面歌词">×</button>
+    </div></div>
+    <div id="dltPrev"></div>
+    <div id="dltCur">♪ 等待播放</div>
+    <div id="dltNext"></div>
+    <div class="dlt-actions">
+      <button class="dlt-nav" id="dltPrevBtn" title="上一首">⏮</button>
+      <button class="dlt-nav" id="dltPlay" title="播放/暂停">▶</button>
+      <button class="dlt-nav" id="dltNextBtn" title="下一首">⏭</button>
+      <span class="dlt-foot">${state.current ? esc(state.current.artist || '') : '拾音 · 本地音乐'}</span>
+    </div>`;
+  let fontSize = 22;
+  doc.getElementById('dltClose').addEventListener('click', closeDesktopLyrics);
+  doc.getElementById('dltPrevBtn').addEventListener('click', prevTrack);
+  doc.getElementById('dltNextBtn').addEventListener('click', () => nextTrack(false));
+  doc.getElementById('dltPlay').addEventListener('click', togglePlay);
+  doc.getElementById('dltFontMinus').addEventListener('click', () => {
+    fontSize = Math.max(14, fontSize - 2);
+    const cur = doc.getElementById('dltCur');
+    if (cur) cur.style.fontSize = `${fontSize}px`;
+  });
+  doc.getElementById('dltFontPlus').addEventListener('click', () => {
+    fontSize = Math.min(34, fontSize + 2);
+    const cur = doc.getElementById('dltCur');
+    if (cur) cur.style.fontSize = `${fontSize}px`;
+  });
+  win.addEventListener('pagehide', () => {
+    if (desktopLyricsWindow === win) closeDesktopLyrics();
+  });
+  const btn = $('#npLyricsBtn');
+  if (btn) btn.classList.add('on');
+  paintDesktopLyrics();
+  desktopLyricsTimer = setInterval(paintDesktopLyrics, 200);
 }
 
 const PLAY_MODE_ICONS = {
@@ -3778,12 +3885,9 @@ async function handleAction(action, el, event) {
     case 'cycle-play-mode':
       cyclePlayMode();
       break;
-    case 'toggle-lyrics': {
-      const nowPlaying = $('#nowPlaying');
-      if (nowPlaying) nowPlaying.classList.toggle('lyrics-collapsed');
-      if (el) el.classList.toggle('active', Boolean(nowPlaying && nowPlaying.classList.contains('lyrics-collapsed')));
+    case 'toggle-lyrics':
+      await toggleDesktopLyrics();
       break;
-    }
     case 'set-repeat-list':
       setRepeatMode('list');
       break;

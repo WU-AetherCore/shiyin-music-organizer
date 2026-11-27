@@ -419,6 +419,13 @@ def artist_detail():
     groups = group_artist_tracks(db.all_tracks(_paths()))
     group = groups.get(artist_key(name))
     if group is None:
+        # 列表显示的是合并后的规范名（例如“G.E.M. 邓紫棋”），
+        # 其 key 可能对应被合并的短名，不能只按 artist_key 查一次。
+        for candidate in groups.values():
+            if candidate["name"] == name or artist_key(candidate["name"]) == artist_key(name):
+                group = candidate
+                break
+    if group is None:
         return jsonify({"ok": False, "error": "找不到这个歌手"}), 404
     name = group["name"]
     tracks = group["tracks"]

@@ -947,9 +947,9 @@ body:not(.is-playing) .eq-bars { opacity: 0; }
   background: linear-gradient(135deg, rgba(92,104,140,.75), rgba(50,58,86,.85));
   font-size: 17px; font-weight: 700; letter-spacing: 1px;
 }
-.np-mode-btn.np-lyrics-btn.active {
-  color: #061020; background: linear-gradient(135deg, #b9d7ff, #7fa8ff);
-  border-color: rgba(180,210,255,.8); box-shadow: 0 0 22px rgba(120,170,255,.4);
+.np-mode-btn.np-lyrics-btn.active, .np-mode-btn.np-lyrics-btn.on {
+  color: #fff; background: linear-gradient(135deg, #2fce6b, #16a34a);
+  border-color: rgba(160,255,190,.65); box-shadow: 0 0 24px rgba(34,197,94,.5), inset 0 1px 0 rgba(255,255,255,.35);
 }
 .nowplaying.lyrics-collapsed .np-body { grid-template-columns: 1fr; justify-items: center; }
 .nowplaying.lyrics-collapsed .np-right { display: none; }
