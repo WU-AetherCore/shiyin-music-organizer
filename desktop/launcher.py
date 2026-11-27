@@ -319,6 +319,27 @@ def kill_other_instances() -> None:
         log("kill stale instances failed\n" + traceback.format_exc())
 
 
+def close_stale_windows() -> None:
+    """关闭旧版本 window.open 留下的桌面歌词浏览器窗口。"""
+    user32 = ctypes.windll.user32
+    callback_type = ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_void_p, ctypes.c_void_p)
+
+    def callback(hwnd, _lparam):
+        if not user32.IsWindowVisible(hwnd):
+            return True
+        length = user32.GetWindowTextLengthW(hwnd)
+        if not length:
+            return True
+        text = ctypes.create_unicode_buffer(length + 1)
+        user32.GetWindowTextW(hwnd, text, length + 1)
+        title = text.value.strip()
+        if title == "127.0.0.1:8765" or title.startswith("127.0.0.1:8765 "):
+            user32.PostMessageW(hwnd, 0x0010, 0, 0)  # WM_CLOSE
+        return True
+
+    user32.EnumWindows(callback_type(callback), 0)
+
+
 def run() -> int:
     if not single_instance():
         if focus_existing_window():
@@ -327,6 +348,7 @@ def run() -> int:
         log("stale instance without window; terminating it")
         kill_other_instances()
         time.sleep(1.0)
+    close_stale_windows()
     ensure_ffmpeg()
     log(f"launcher start version={APP_VERSION} frozen={getattr(sys, 'frozen', False)}")
 
