@@ -2696,123 +2696,133 @@ function syncCoverSpin() {
 }
 
 let desktopLyricsWindow = null;
+let desktopLyricsRoot = null;
 let desktopLyricsTimer = 0;
 
-function desktopLyricRows() {
-  const lines = (state.lyrics && state.lyrics.lines) || [];
-  const active = (state.lyrics && state.lyrics.active) || -1;
-  const current = active >= 0 && lines[active] ? lines[active].text : '';
-  const prev = active > 0 && lines[active - 1] ? lines[active - 1].text : '';
-  const next = active >= 0 && lines[active + 1] ? lines[active + 1].text : '';
-  const title = state.current ? `${state.current.title || ''}` : '';
-  return { current: current || title || '等待播放', prev, next: next || (state.current ? '♪' : '打开拾音开始播放'), title };
+const DESKTOP_LYRICS_STYLE = `
+#dltRoot{position:fixed;left:50%;bottom:calc(var(--player-h, 88px) + 18px);transform:translateX(-50%);min-width:300px;max-width:min(620px,88vw);font-size:26px;color:#fff;background:rgba(16,21,38,.92);backdrop-filter:blur(28px) saturate(180%) brightness(1.06);-webkit-backdrop-filter:blur(28px) saturate(180%) brightness(1.06);border:1px solid rgba(255,255,255,.22);border-radius:22px;padding:12px 18px 14px;box-shadow:0 8px 32px rgba(0,0,0,.45),inset 0 1px 1px rgba(255,255,255,.28);user-select:none;z-index:999999;box-sizing:border-box;cursor:grab}
+#dltRoot.dragging{cursor:grabbing}
+#dltRoot.in-pip{position:static;transform:none;left:auto;bottom:auto;min-width:0;max-width:none;width:100%;height:100%;background:transparent;border:none;border-radius:0;padding:14px 18px;display:flex;flex-direction:column;justify-content:center;cursor:default;box-sizing:border-box}
+#dltBar{display:flex;gap:5px;align-items:center;margin-bottom:6px;opacity:0;transition:opacity .25s}
+#dltRoot:hover #dltBar,#dltRoot.in-pip #dltBar{opacity:1}
+.dlt-btn{width:30px;height:30px;border-radius:9px;background:rgba(255,255,255,.14);border:1px solid rgba(255,255,255,.18);color:#fff;font-size:13px;font-weight:600;display:flex;align-items:center;justify-content:center;cursor:pointer;line-height:1;padding:0;transition:background .2s}
+.dlt-btn:hover{background:rgba(255,255,255,.30)}
+.dlt-sep{width:1px;height:20px;background:rgba(255,255,255,.22);margin:0 4px}
+#dltNext{font-size:.58em;color:rgba(255,255,255,.62);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-height:1.1em;margin-bottom:2px}
+#dltCur{font-size:1em;font-weight:700;color:#fff;line-height:1.3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-shadow:0 1px 10px rgba(0,0,0,.5)}
+#dltRoot.in-pip #dltCur{white-space:normal}
+#dltHint{font-size:12px;color:#e8edff;margin-top:6px;opacity:.9;line-height:1.4}
+`;
+
+function installDesktopLyricsStyle(doc) {
+  if (doc.getElementById('dltStyleEl')) return;
+  const style = doc.createElement('style');
+  style.id = 'dltStyleEl';
+  style.textContent = DESKTOP_LYRICS_STYLE;
+  (doc.head || doc.documentElement).appendChild(style);
 }
 
-function paintDesktopLyrics() {
-  const win = desktopLyricsWindow;
-  if (!win || win.closed) return;
-  const doc = win.document;
-  const rows = desktopLyricRows();
-  const cur = doc.getElementById('dltCur');
-  const prev = doc.getElementById('dltPrev');
-  const next = doc.getElementById('dltNext');
-  const play = doc.getElementById('dltPlay');
-  if (cur) cur.textContent = rows.current;
-  if (prev) prev.textContent = rows.prev;
-  if (next) next.textContent = rows.next;
-  if (play) play.textContent = audio.paused ? '▶' : 'Ⅱ';
+function buildDesktopLyricsRoot() {
+  if (desktopLyricsRoot) return desktopLyricsRoot;
+  const root = document.createElement('div');
+  root.id = 'dltRoot';
+  root.innerHTML = `
+    <div id="dltBar">
+      <button class="dlt-btn" id="dltPrev" title="上一首">⏮</button>
+      <button class="dlt-btn" id="dltPlay" title="播放/暂停">▶</button>
+      <button class="dlt-btn" id="dltNextBtn" title="下一首">⏭</button>
+      <span class="dlt-sep"></span>
+      <button class="dlt-btn" id="dltDec" title="减小字号">A-</button>
+      <button class="dlt-btn" id="dltInc" title="增大字号">A+</button>
+      <button class="dlt-btn" id="dltClose" title="关闭桌面歌词">×</button>
+    </div>
+    <div id="dltNext"></div>
+    <div id="dltCur">♪ 等待播放</div>
+    <div id="dltHint"></div>`;
+  let fontSize = 26;
+  const setFont = (px) => {
+    fontSize = Math.max(16, Math.min(56, px));
+    root.style.fontSize = `${fontSize}px`;
+  };
+  root.querySelector('#dltPrev').addEventListener('click', (e) => { e.stopPropagation(); prevTrack(); });
+  root.querySelector('#dltNextBtn').addEventListener('click', (e) => { e.stopPropagation(); nextTrack(false); });
+  root.querySelector('#dltPlay').addEventListener('click', (e) => { e.stopPropagation(); togglePlay(); });
+  root.querySelector('#dltDec').addEventListener('click', (e) => { e.stopPropagation(); setFont(fontSize - 2); });
+  root.querySelector('#dltInc').addEventListener('click', (e) => { e.stopPropagation(); setFont(fontSize + 2); });
+  root.querySelector('#dltClose').addEventListener('click', (e) => { e.stopPropagation(); closeDesktopLyrics(); });
+  let dragging = false, sx = 0, sy = 0, sl = 0, st = 0;
+  root.addEventListener('mousedown', (e) => {
+    if (e.target.closest('.dlt-btn') || root.classList.contains('in-pip')) return;
+    dragging = true; root.classList.add('dragging');
+    sx = e.clientX; sy = e.clientY;
+    const rect = root.getBoundingClientRect(); sl = rect.left; st = rect.top;
+    root.style.transform = 'none'; root.style.bottom = 'auto';
+    root.style.left = `${sl}px`; root.style.top = `${st}px`;
+    e.preventDefault();
+  });
+  document.addEventListener('mousemove', (e) => {
+    if (!dragging) return;
+    root.style.left = `${Math.max(0, Math.min(window.innerWidth - root.offsetWidth, sl + e.clientX - sx))}px`;
+    root.style.top = `${Math.max(0, Math.min(window.innerHeight - root.offsetHeight, st + e.clientY - sy))}px`;
+  });
+  document.addEventListener('mouseup', () => { dragging = false; root.classList.remove('dragging'); });
+  desktopLyricsRoot = root;
+  return root;
+}
+
+function updateDesktopLyrics() {
+  const root = desktopLyricsRoot;
+  if (!root) return;
+  const doc = root.ownerDocument;
+  const lines = (state.lyrics && state.lyrics.lines) || [];
+  const active = (state.lyrics && state.lyrics.active) || -1;
+  const currentEl = doc.getElementById('dltCur');
+  const nextEl = doc.getElementById('dltNext');
+  const playEl = doc.getElementById('dltPlay');
+  if (currentEl) {
+    currentEl.textContent = active >= 0 && lines[active] ? lines[active].text : (audio.paused ? '♪ 等待播放' : '♪ 欣赏纯音乐');
+  }
+  if (nextEl) nextEl.textContent = active >= 0 && lines[active + 1] ? lines[active + 1].text : '';
+  if (playEl) playEl.textContent = audio.paused ? '▶' : 'Ⅱ';
 }
 
 function closeDesktopLyrics() {
-  if (desktopLyricsTimer) {
-    clearInterval(desktopLyricsTimer);
-    desktopLyricsTimer = 0;
-  }
-  if (desktopLyricsWindow) {
-    try { desktopLyricsWindow.close(); } catch (err) {}
-    desktopLyricsWindow = null;
-  }
+  if (desktopLyricsTimer) { clearInterval(desktopLyricsTimer); desktopLyricsTimer = 0; }
+  if (desktopLyricsWindow) { try { desktopLyricsWindow.close(); } catch (err) {} desktopLyricsWindow = null; }
+  if (desktopLyricsRoot) { desktopLyricsRoot.remove(); desktopLyricsRoot = null; }
   const btn = $('#npLyricsBtn');
   if (btn) btn.classList.remove('on');
 }
 
 async function toggleDesktopLyrics() {
-  if (desktopLyricsWindow && !desktopLyricsWindow.closed) {
-    closeDesktopLyrics();
-    return;
-  }
-  let win = null;
-  try {
-    if ('documentPictureInPicture' in window) {
-      win = await documentPictureInPicture.requestWindow({ width: 560, height: 190 });
-    } else {
-      win = window.open('', 'shiyin-desktop-lyrics', 'popup=yes,width=560,height=190');
-    }
-  } catch (err) {
-    toast('浏览器不支持桌面歌词窗口', 'err');
-    return;
-  }
-  if (!win) {
-    toast('桌面歌词窗口被浏览器拦截', 'err');
-    return;
-  }
-  desktopLyricsWindow = win;
-  const doc = win.document;
-  doc.title = '拾音 · 桌面歌词';
-  doc.body.innerHTML = `
-    <style>
-      *{box-sizing:border-box}
-      html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#101421;color:#f5f7ff;font-family:"Microsoft YaHei","PingFang SC",sans-serif}
-      body{padding:12px 16px;background:radial-gradient(120% 160% at 50% 0%,#202943,#0d111c 72%);border:1px solid rgba(255,255,255,.12);border-radius:18px}
-      .dlt-top{display:flex;align-items:center;justify-content:space-between;color:#9ca9c6;font-size:11px;letter-spacing:.8px}
-      .dlt-tools{display:flex;align-items:center;gap:6px}
-      .dlt-btn{border:0;background:rgba(255,255,255,.10);color:#e8edff;width:26px;height:26px;border-radius:8px;cursor:pointer;font-size:14px;line-height:1}
-      .dlt-btn:hover{background:rgba(255,255,255,.18)}
-      #dltPrev{min-height:16px;margin-top:4px;color:#8d9bb9;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-      #dltCur{margin-top:4px;color:#fff6cf;font-size:22px;font-weight:600;line-height:1.35;text-shadow:0 0 16px rgba(255,228,150,.3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-      #dltNext{margin-top:4px;color:#aeb8d2;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-      .dlt-foot{margin-top:7px;color:#64718e;font-size:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-      .dlt-actions{display:flex;align-items:center;gap:12px;margin-top:7px}
-      .dlt-nav{border:0;background:transparent;color:#c9d3eb;font-size:17px;cursor:pointer;padding:0 5px}
-      .dlt-nav:hover{color:#fff}
-      .dlt-close{margin-left:auto}
-    </style>
-    <div class="dlt-top"><span>拾音 · 桌面歌词</span><div class="dlt-tools">
-      <button class="dlt-btn" id="dltFontMinus" title="缩小字号">A-</button>
-      <button class="dlt-btn" id="dltFontPlus" title="放大字号">A+</button>
-      <button class="dlt-btn dlt-close" id="dltClose" title="关闭桌面歌词">×</button>
-    </div></div>
-    <div id="dltPrev"></div>
-    <div id="dltCur">♪ 等待播放</div>
-    <div id="dltNext"></div>
-    <div class="dlt-actions">
-      <button class="dlt-nav" id="dltPrevBtn" title="上一首">⏮</button>
-      <button class="dlt-nav" id="dltPlay" title="播放/暂停">▶</button>
-      <button class="dlt-nav" id="dltNextBtn" title="下一首">⏭</button>
-      <span class="dlt-foot">${state.current ? esc(state.current.artist || '') : '拾音 · 本地音乐'}</span>
-    </div>`;
-  let fontSize = 22;
-  doc.getElementById('dltClose').addEventListener('click', closeDesktopLyrics);
-  doc.getElementById('dltPrevBtn').addEventListener('click', prevTrack);
-  doc.getElementById('dltNextBtn').addEventListener('click', () => nextTrack(false));
-  doc.getElementById('dltPlay').addEventListener('click', togglePlay);
-  doc.getElementById('dltFontMinus').addEventListener('click', () => {
-    fontSize = Math.max(14, fontSize - 2);
-    const cur = doc.getElementById('dltCur');
-    if (cur) cur.style.fontSize = `${fontSize}px`;
-  });
-  doc.getElementById('dltFontPlus').addEventListener('click', () => {
-    fontSize = Math.min(34, fontSize + 2);
-    const cur = doc.getElementById('dltCur');
-    if (cur) cur.style.fontSize = `${fontSize}px`;
-  });
-  win.addEventListener('pagehide', () => {
-    if (desktopLyricsWindow === win) closeDesktopLyrics();
-  });
+  if (desktopLyricsRoot) { closeDesktopLyrics(); return; }
+  const root = buildDesktopLyricsRoot();
+  installDesktopLyricsStyle(document);
+  document.body.appendChild(root);
   const btn = $('#npLyricsBtn');
   if (btn) btn.classList.add('on');
-  paintDesktopLyrics();
-  desktopLyricsTimer = setInterval(paintDesktopLyrics, 200);
+  if ('documentPictureInPicture' in window) {
+    try {
+      const pip = await documentPictureInPicture.requestWindow({ width: 560, height: 190 });
+      desktopLyricsWindow = pip;
+      installDesktopLyricsStyle(pip.document);
+      pip.document.documentElement.style.background = 'transparent';
+      pip.document.documentElement.style.height = '100%';
+      pip.document.body.style.margin = '0';
+      pip.document.body.style.overflow = 'hidden';
+      pip.document.body.style.height = '100%';
+      pip.document.body.style.background = 'transparent';
+      root.classList.add('in-pip');
+      pip.document.body.appendChild(root);
+      pip.addEventListener('pagehide', () => { if (desktopLyricsWindow === pip) closeDesktopLyrics(); });
+    } catch (err) {
+      desktopLyricsWindow = null;
+      root.classList.remove('in-pip');
+      document.body.appendChild(root);
+    }
+  }
+  updateDesktopLyrics();
+  desktopLyricsTimer = setInterval(updateDesktopLyrics, 200);
 }
 
 const PLAY_MODE_ICONS = {
